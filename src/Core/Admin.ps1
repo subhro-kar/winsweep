@@ -14,7 +14,7 @@ function Start-ElevatedSelf {
         throw 'Cannot self-elevate because script path is unavailable.'
     }
 
-    $args = @(
+    $argList = @(
         '-NoProfile',
         '-STA',
         '-WindowStyle',
@@ -26,10 +26,10 @@ function Start-ElevatedSelf {
         '-Elevated'
     )
 
-    if ($RequireAdmin) { $args += '-RequireAdmin' }
-    if ($NoElevationPrompt) { $args += '-NoElevationPrompt' }
+    if ($RequireAdmin) { $argList += '-RequireAdmin' }
+    if ($NoElevationPrompt) { $argList += '-NoElevationPrompt' }
 
-    Start-Process -FilePath $psHostPath -Verb RunAs -WindowStyle Hidden -ArgumentList $args | Out-Null
+    Start-Process -FilePath $psHostPath -Verb RunAs -WindowStyle Hidden -ArgumentList $argList | Out-Null
 }
 
 function Ensure-LaunchMode {

@@ -1,5 +1,4 @@
-function Start-WinCleanGui {
-    $form = New-Object System.Windows.Forms.Form
+$form = New-Object System.Windows.Forms.Form
     $form.Text = 'Windows Cleaner'
     $form.Size = New-Object System.Drawing.Size(1100, 700)
     $form.StartPosition = 'CenterScreen'
@@ -84,7 +83,7 @@ function Start-WinCleanGui {
             $p = [string]$sender.Rows[$e.RowIndex].Cells['PathOrKey'].Value
             if ($p) { $tip.SetToolTip($sender, $p) }
         }
-    }.GetNewClosure())
+    })
 
     $split.Panel1.Controls.Add($categories)
     $split.Panel2.Controls.Add($grid)
@@ -124,22 +123,22 @@ function Start-WinCleanGui {
         if ($grid.IsCurrentCellDirty) {
             $grid.CommitEdit([System.Windows.Forms.DataGridViewDataErrorContexts]::Commit)
         }
-    }.GetNewClosure())
+    })
     $grid.Add_CellValueChanged({ Update-Counts }.GetNewClosure())
 
     $btnSelectAll.Add_Click({
         foreach ($row in $grid.Rows) { $row.Cells['Selected'].Value = $true }
         Update-Counts
-    }.GetNewClosure())
+    })
 
     $btnSelectNone.Add_Click({
         foreach ($row in $grid.Rows) { $row.Cells['Selected'].Value = $false }
         Update-Counts
-    }.GetNewClosure())
+    })
 
     $btnOpenBackup.Add_Click({
         Start-Process explorer.exe $script:WinCleanRoot
-    }.GetNewClosure())
+    })
 
     $btnScanOptions.Add_Click({
         $split.Panel1Collapsed = $false
@@ -147,11 +146,11 @@ function Start-WinCleanGui {
             $split.Panel2Collapsed = $false
         }
         $toolStatus.Text = 'Scan options visible. Adjust categories and click Scan.'
-    }.GetNewClosure())
+    })
 
     $btnUndo.Add_Click({
         Show-UndoDialog -BackupDir $script:WinCleanRoot
-    }.GetNewClosure())
+    })
 
     $btnScan.Add_Click({
         $selectedCategories = @()
@@ -263,7 +262,7 @@ function Start-WinCleanGui {
             $toolProgress.Visible = $false
             Update-Counts
         }
-    }.GetNewClosure())
+    })
 
     $btnClean.Add_Click({
         $selectedRows = @()
@@ -307,8 +306,8 @@ function Start-WinCleanGui {
         $btnNo.Width = 90
 
         $script:confirmProceed = $false
-        $btnYes.Add_Click({ $script:confirmProceed = $true; $confirmForm.Close() })
-        $btnNo.Add_Click({ $confirmForm.Close() })
+        $btnYes.Add_Click({ $script:confirmProceed = $true; $confirmForm.Close() }.GetNewClosure())
+        $btnNo.Add_Click({ $confirmForm.Close() }.GetNewClosure())
 
         $confirmForm.Controls.Add($lbl)
         $confirmForm.Controls.Add($chkRestore)
@@ -585,7 +584,6 @@ function Start-WinCleanGui {
         $script:cleanupCancelRequested = $true
         $progressForm.Close()
         $btnScan.PerformClick()
-    }.GetNewClosure())
+    })
 
-    [void]$form.ShowDialog()
-}
+[void]$form.ShowDialog()
