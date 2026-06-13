@@ -265,7 +265,6 @@ $form = New-Object System.Windows.Forms.Form
     })
 
     $btnClean.Add_Click({
-        [System.Windows.Forms.MessageBox]::Show('Clean handler invoked', 'DEBUG', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
         try {
         $selectedRows = @()
         for ($i = 0; $i -lt $grid.Rows.Count; $i++) {
