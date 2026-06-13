@@ -84,7 +84,7 @@ function Start-WinCleanGui {
             $p = [string]$sender.Rows[$e.RowIndex].Cells['PathOrKey'].Value
             if ($p) { $tip.SetToolTip($sender, $p) }
         }
-    })
+    }.GetNewClosure())
 
     $split.Panel1.Controls.Add($categories)
     $split.Panel2.Controls.Add($grid)
@@ -104,6 +104,14 @@ function Start-WinCleanGui {
 
     $resultsStore = [System.Collections.Generic.List[object]]::new()
 
+    function Update-Counts {
+        $selected = 0
+        foreach ($row in $grid.Rows) {
+            if ($row.Cells['Selected'].Value -eq $true) { $selected++ }
+        }
+        $statCounts.Text = "Found: $($grid.Rows.Count) | Selected: $selected"
+    }
+
     $btnClean.Visible = $false
     $btnSelectAll.Visible = $false
     $btnSelectNone.Visible = $false
@@ -116,22 +124,22 @@ function Start-WinCleanGui {
         if ($grid.IsCurrentCellDirty) {
             $grid.CommitEdit([System.Windows.Forms.DataGridViewDataErrorContexts]::Commit)
         }
-    })
-    $grid.Add_CellValueChanged({ Update-Counts })
+    }.GetNewClosure())
+    $grid.Add_CellValueChanged({ Update-Counts }.GetNewClosure())
 
     $btnSelectAll.Add_Click({
         foreach ($row in $grid.Rows) { $row.Cells['Selected'].Value = $true }
         Update-Counts
-    })
+    }.GetNewClosure())
 
     $btnSelectNone.Add_Click({
         foreach ($row in $grid.Rows) { $row.Cells['Selected'].Value = $false }
         Update-Counts
-    })
+    }.GetNewClosure())
 
     $btnOpenBackup.Add_Click({
         Start-Process explorer.exe $script:WinCleanRoot
-    })
+    }.GetNewClosure())
 
     $btnScanOptions.Add_Click({
         $split.Panel1Collapsed = $false
@@ -139,11 +147,11 @@ function Start-WinCleanGui {
             $split.Panel2Collapsed = $false
         }
         $toolStatus.Text = 'Scan options visible. Adjust categories and click Scan.'
-    })
+    }.GetNewClosure())
 
     $btnUndo.Add_Click({
         Show-UndoDialog -BackupDir $script:WinCleanRoot
-    })
+    }.GetNewClosure())
 
     $btnScan.Add_Click({
         $selectedCategories = @()
@@ -255,7 +263,7 @@ function Start-WinCleanGui {
             $toolProgress.Visible = $false
             Update-Counts
         }
-    })
+    }.GetNewClosure())
 
     $btnClean.Add_Click({
         $selectedRows = @()
@@ -577,7 +585,7 @@ function Start-WinCleanGui {
         $script:cleanupCancelRequested = $true
         $progressForm.Close()
         $btnScan.PerformClick()
-    })
+    }.GetNewClosure())
 
     [void]$form.ShowDialog()
 }

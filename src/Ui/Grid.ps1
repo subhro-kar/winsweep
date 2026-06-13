@@ -61,11 +61,3 @@ function Add-ResultRow {
         $TargetGrid.Rows[$idx].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(255, 246, 232)
     }
 }
-
-function Update-Counts {
-    $selected = 0
-    foreach ($row in $grid.Rows) {
-        if ($row.Cells['Selected'].Value -eq $true) { $selected++ }
-    }
-    $statCounts.Text = "Found: $($grid.Rows.Count) | Selected: $selected"
-}
