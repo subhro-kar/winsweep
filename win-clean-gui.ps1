@@ -24,10 +24,9 @@ $script:WinCleanRoot = $PSScriptRoot
 . (Join-Path $PSScriptRoot 'src\Categories.ps1')
 . (Join-Path $PSScriptRoot 'src\Cleanup\Recovery.ps1')
 . (Join-Path $PSScriptRoot 'src\Ui\Grid.ps1')
-. (Join-Path $PSScriptRoot 'src\Ui\MainForm.ps1')
 
 if (-not (Ensure-LaunchMode)) {
     return
 }
 
-Start-WinCleanGui
+. (Join-Path $PSScriptRoot 'src\Ui\MainForm.ps1')
