@@ -587,7 +587,6 @@ $form = New-Object System.Windows.Forms.Form
         $script:cleanupCancelRequested = $true
         $btnCancelCleanup.Enabled = $false
         $progressForm.Close()
-        $btnScan.PerformClick()
         } catch {
             [System.Windows.Forms.MessageBox]::Show("Clean error: $($_.Exception.Message)", 'Error', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
         }
