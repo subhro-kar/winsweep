@@ -265,6 +265,7 @@ $form = New-Object System.Windows.Forms.Form
     })
 
     $btnClean.Add_Click({
+        [System.Windows.Forms.MessageBox]::Show('Clean handler invoked', 'DEBUG', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
         try {
         $selectedRows = @()
         for ($i = 0; $i -lt $grid.Rows.Count; $i++) {
@@ -306,17 +307,17 @@ $form = New-Object System.Windows.Forms.Form
         $btnNo.Location = New-Object System.Drawing.Point(400, 170)
         $btnNo.Width = 90
 
-        $script:confirmProceed = $false
-        $btnYes.Add_Click({ $script:confirmProceed = $true; $confirmForm.Close() }.GetNewClosure())
-        $btnNo.Add_Click({ $confirmForm.Close() }.GetNewClosure())
+        $btnYes.DialogResult = [System.Windows.Forms.DialogResult]::OK
+        $btnNo.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
 
         $confirmForm.Controls.Add($lbl)
         $confirmForm.Controls.Add($chkRestore)
         $confirmForm.Controls.Add($btnYes)
         $confirmForm.Controls.Add($btnNo)
 
-        [void]$confirmForm.ShowDialog()
-        if (-not $script:confirmProceed) { return }
+        $confirmForm.AcceptButton = $btnYes
+        $confirmForm.CancelButton = $btnNo
+        if ($confirmForm.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { return }
 
         if ($chkRestore.Checked) {
             $toolStatus.Text = 'Creating restore point...'
