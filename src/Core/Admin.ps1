@@ -10,7 +10,7 @@ function Start-ElevatedSelf {
         $psHostPath = 'powershell.exe'
     }
 
-    if ([string]::IsNullOrWhiteSpace($PSCommandPath)) {
+    if ([string]::IsNullOrWhiteSpace($script:WinCleanEntryScript)) {
         throw 'Cannot self-elevate because script path is unavailable.'
     }
 
@@ -22,7 +22,7 @@ function Start-ElevatedSelf {
         '-ExecutionPolicy',
         'Bypass',
         '-File',
-        "`"$PSCommandPath`"",
+        "`"$script:WinCleanEntryScript`"",
         '-Elevated'
     )
 
