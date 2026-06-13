@@ -585,6 +585,7 @@ $form = New-Object System.Windows.Forms.Form
         ) | Out-Null
 
         $script:cleanupCancelRequested = $true
+        $btnCancelCleanup.Enabled = $false
         $progressForm.Close()
         $btnScan.PerformClick()
         } catch {
