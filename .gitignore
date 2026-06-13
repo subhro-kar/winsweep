@@ -1,6 +1,5 @@
 *.log
 backup_*.reg
 undo_*.json
-*.private.md
-WIN-CLEAN-GUI-PLAN.md
+plans/
 
