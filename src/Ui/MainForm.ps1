@@ -339,6 +339,8 @@ $form = New-Object System.Windows.Forms.Form
         $progressForm.MinimumSize = New-Object System.Drawing.Size(760, 360)
         $progressForm.StartPosition = 'CenterParent'
         $progressForm.SizeGripStyle = 'Show'
+        $progressForm.TopMost = $true
+        $progressForm.Owner = $form
 
         $progressTop = New-Object System.Windows.Forms.Panel
         $progressTop.Dock = 'Top'
