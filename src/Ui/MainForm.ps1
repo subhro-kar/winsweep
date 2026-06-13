@@ -437,7 +437,7 @@ $form = New-Object System.Windows.Forms.Form
                 $logLines.Add('[CANCEL] Cleanup cancelled by user.')
                 break
             }
-        }
+        }.GetNewClosure()
 
         $currentStep = 0
         foreach ($rowIndex in $selectedRows) {
