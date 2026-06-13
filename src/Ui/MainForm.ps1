@@ -124,7 +124,7 @@ $form = New-Object System.Windows.Forms.Form
             $grid.CommitEdit([System.Windows.Forms.DataGridViewDataErrorContexts]::Commit)
         }
     })
-    $grid.Add_CellValueChanged({ Update-Counts }.GetNewClosure())
+    $grid.Add_CellValueChanged({ Update-Counts })
 
     $btnSelectAll.Add_Click({
         foreach ($row in $grid.Rows) { $row.Cells['Selected'].Value = $true }
@@ -387,7 +387,7 @@ $form = New-Object System.Windows.Forms.Form
             $script:cleanupCancelRequested = $true
             $btnCancelCleanup.Enabled = $false
             $btnCancelCleanup.Text = 'Cancelling...'
-        })
+        }.GetNewClosure())
 
         $progressForm.Add_FormClosing({
             if (-not $script:cleanupCancelRequested -and $btnCancelCleanup.Enabled) {
@@ -407,7 +407,7 @@ $form = New-Object System.Windows.Forms.Form
                     $_.Cancel = $true
                 }
             }
-        })
+        }.GetNewClosure())
 
         $progressForm.Show()
 
