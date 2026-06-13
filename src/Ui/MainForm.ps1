@@ -442,6 +442,7 @@ $form = New-Object System.Windows.Forms.Form
         }.GetNewClosure()
 
         $currentStep = 0
+        $cleanedRows = [System.Collections.Generic.List[int]]::new()
         foreach ($rowIndex in $selectedRows) {
             $currentStep++
             $item = $resultsStore[$rowIndex]
@@ -557,6 +558,9 @@ $form = New-Object System.Windows.Forms.Form
 
                 $list.Items.Add("[OK] $line")
                 $logLines.Add("[OK] $line")
+                if ($line -match '^REMOVED|^PROCESSED') {
+                    $cleanedRows.Add($rowIndex)
+                }
             } catch {
                 $msg = "[FAIL] $($item.Name): $($_.Exception.Message)"
                 $list.Items.Add($msg)
@@ -574,11 +578,39 @@ $form = New-Object System.Windows.Forms.Form
         $logLines.Add("Undo manifest: $manifestPath")
         $logLines | Set-Content -LiteralPath $logPath -Encoding UTF8
 
+        $cleanedRowIndexes = @($cleanedRows | Sort-Object -Unique -Descending)
+        foreach ($rowIndex in $cleanedRowIndexes) {
+            if ($rowIndex -ge 0 -and $rowIndex -lt $grid.Rows.Count) {
+                $grid.Rows.RemoveAt($rowIndex)
+            }
+            if ($rowIndex -ge 0 -and $rowIndex -lt $resultsStore.Count) {
+                $resultsStore.RemoveAt($rowIndex)
+            }
+        }
+
+        if ($grid.Rows.Count -eq 0) {
+            $btnClean.Visible = $false
+            $btnSelectAll.Visible = $false
+            $btnSelectNone.Visible = $false
+            $btnClean.Enabled = $false
+            $btnSelectAll.Enabled = $false
+            $btnSelectNone.Enabled = $false
+            $split.Panel1Collapsed = $false
+            $split.Panel2Collapsed = $true
+        } else {
+            $btnClean.Enabled = $true
+            $btnSelectAll.Enabled = $true
+            $btnSelectNone.Enabled = $true
+        }
+
+        Update-Counts
+        $form.Refresh()
+
         $statInfo.Text = "Backup dir: $script:WinCleanRoot"
-        $toolStatus.Text = "Cleanup complete. Log: $logPath"
+        $toolStatus.Text = "Cleanup complete. Removed $($cleanedRowIndexes.Count) item(s). Log: $logPath"
 
         [System.Windows.Forms.MessageBox]::Show(
-            "Cleanup complete.`r`nLog: $logPath`r`nUndo manifest: $manifestPath",
+            "Cleanup complete.`r`nRemoved from results: $($cleanedRowIndexes.Count) item(s).`r`nLog: $logPath`r`nUndo manifest: $manifestPath",
             'Done',
             [System.Windows.Forms.MessageBoxButtons]::OK,
             [System.Windows.Forms.MessageBoxIcon]::Information
