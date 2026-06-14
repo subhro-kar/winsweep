@@ -437,7 +437,7 @@ $form = New-Object System.Windows.Forms.Form
                 $abortCleanup = $true
                 $list.Items.Add('[CANCEL] Cleanup cancelled by user. Stopping after current item.')
                 $logLines.Add('[CANCEL] Cleanup cancelled by user.')
-                break
+                return
             }
         }.GetNewClosure()
 
