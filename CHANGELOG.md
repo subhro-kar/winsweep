@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stale Downloads scanner (installers/archives older than 30 days in ~/Downloads)
 - App-specific cleanup presets: VS Code Cache, Discord Cache, npm Cache, pip Cache, NuGet Cache
 - Row color coding for Registry (red), Application (blue), Deep Clean (green)
+- README.md with usage instructions and safety notes
+- MIT LICENSE file
+- GitHub Actions release workflow (creates releases on v* tag push)
 
 ### Fixed
 
