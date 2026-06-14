@@ -799,47 +799,6 @@ function Find-BrokenShortcuts {
     return $results
 }
 
-function Find-EmptyFolders {
-    $results = [System.Collections.Generic.List[object]]::new()
-
-    $scanRoots = @(
-        [System.Environment]::GetFolderPath('ProgramFiles'),
-        ${env:ProgramFiles(x86)},
-        [System.Environment]::GetFolderPath('ApplicationData'),
-        [System.Environment]::GetFolderPath('LocalApplicationData'),
-        [System.Environment]::GetFolderPath('CommonApplicationData'),
-        [System.Environment]::GetFolderPath('UserProfile')
-    ) | Where-Object { $_ -and (Test-PathExists $_) } | Select-Object -Unique
-
-    $ignoredFolders = @(
-        'Microsoft', 'Windows', 'WindowsApps', 'Common Files', 'Packages',
-        'nvidia', 'NVIDIA', 'Intel', 'AMD', 'Dell', 'HP', 'Lenovo',
-        'Temp', 'temp', 'cache', 'Cache', 'AppData', 'Roaming', 'Local',
-        'Low', 'VMware', 'Hyper-V', 'docker', 'Docker', 'Microsoft.NET',
-        'Reference Assemblies', 'MSBuild', 'dotnet', 'Steam', 'SteamLibrary',
-        'Google', 'Mozilla', 'Mozilla Firefox', 'BraveSoftware', 'Vivaldi',
-        'Opera', 'Opera Stable', 'CrashDumps', 'CrowdStrike', 'Qualys'
-    )
-
-    foreach ($root in $scanRoots) {
-        foreach ($dir in (Get-ChildItem -LiteralPath $root -Directory -Force -ErrorAction SilentlyContinue)) {
-            if ($ignoredFolders -contains $dir.Name) { continue }
-            if ($dir.Attributes -band [System.IO.FileAttributes]::System) { continue }
-
-            $hasFiles = Get-ChildItem -LiteralPath $dir.FullName -Recurse -File -Force -ErrorAction SilentlyContinue | Select-Object -First 1
-            if (-not $hasFiles) {
-                $results.Add((New-ScanResult -Category 'Advanced' -SubCategory 'Empty Folders' -Name $dir.Name `
-                    -PathOrKey $dir.FullName -Reason 'Empty folder with no files' -DeleteMeta @{
-                        Type = 'FilesystemPath'
-                        Path = $dir.FullName
-                    }))
-            }
-        }
-    }
-
-    return $results
-}
-
 function Find-BrokenComRegistrations {
     $results = [System.Collections.Generic.List[object]]::new()
     $clsidRoot = 'HKCR:\CLSID'
@@ -1165,8 +1124,7 @@ function Get-CategoryDefinitions {
         [PSCustomObject]@{ Name = 'File Associations'; Scanner = 'Find-BrokenFileAssociations'; Group = 'Registry'; Risk = 'Advanced' },
         [PSCustomObject]@{ Name = 'Shell Extensions'; Scanner = 'Find-BrokenShellExtensions'; Group = 'Registry'; Risk = 'Advanced' },
         [PSCustomObject]@{ Name = 'App Paths'; Scanner = 'Find-BrokenAppPaths'; Group = 'Registry'; Risk = 'Advanced' },
-        [PSCustomObject]@{ Name = 'Fonts'; Scanner = 'Find-BrokenFontRegistrations'; Group = 'Registry'; Risk = 'Review' },
-        [PSCustomObject]@{ Name = 'Empty Folders'; Scanner = 'Find-EmptyFolders'; Group = 'Advanced'; Risk = 'Review' }
+        [PSCustomObject]@{ Name = 'Fonts'; Scanner = 'Find-BrokenFontRegistrations'; Group = 'Registry'; Risk = 'Review' }
     )
 }
 
@@ -1352,13 +1310,12 @@ $split.SplitterDistance = 260
 $split.Panel1MinSize = 220
 $split.Panel2Collapsed = $true
 
-$groupOrder = @('Recommended', 'System', 'Applications', 'Registry', 'Advanced')
+$groupOrder = @('Recommended', 'System', 'Applications', 'Registry')
 $groupDefaults = @{
     'Recommended'  = $true
     'System'       = $false
     'Applications' = $false
     'Registry'     = $false
-    'Advanced'     = $false
 }
 
 $tabControl = New-Object System.Windows.Forms.TabControl
