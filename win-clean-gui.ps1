@@ -1405,7 +1405,7 @@ $btnScan.Add_Click({
         $grid.Rows.Clear()
         $resultsStore.Clear()
         $categoryErrors = [System.Collections.Generic.List[string]]::new()
-        $definitions = (Get-CategoryDefinitions | Where-Object { $selectedCategories -contains $_.Name })
+        $definitions = @(Get-CategoryDefinitions | Where-Object { $selectedCategories -contains $_.Name })
 
         $toolProgress.Minimum = 0
         $toolProgress.Maximum = [Math]::Max(1, $definitions.Count)
