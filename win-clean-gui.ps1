@@ -1125,6 +1125,52 @@ function Get-LogFilesItem {
     return (New-DeepCleanAggregateItem -Name 'Log Files' -Reason 'System and crash logs' -Paths $paths -SubCategory 'Log Files')
 }
 
+function Get-VSCodeCacheItem {
+    $paths = @(
+        "$env:LOCALAPPDATA\Microsoft\vscode-cpptools",
+        "$env:LOCALAPPDATA\Microsoft\VS Code\Cache",
+        "$env:LOCALAPPDATA\Microsoft\VS Code\CachedData",
+        "$env:LOCALAPPDATA\Microsoft\VS Code\CachedExtensions",
+        "$env:LOCALAPPDATA\Microsoft\VS Code\CachedExtensionVSIXs",
+        "$env:LOCALAPPDATA\Microsoft\VS Code\logs"
+    ) | Where-Object { Test-PathExists $_ }
+    if ($paths.Count -eq 0) { return $null }
+    return (New-DeepCleanAggregateItem -Name 'VS Code Cache' -Reason 'VS Code extension cache and logs' -Paths $paths -SubCategory 'VS Code Cache')
+}
+
+function Get-DiscordCacheItem {
+    $discordPath = Get-ChildItem -LiteralPath "$env:LOCALAPPDATA\Discord" -Filter 'app-*' -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $discordPath) { return $null }
+    $paths = @(
+        (Join-Path $discordPath.FullName 'Cache'),
+        (Join-Path $discordPath.FullName 'Code Cache'),
+        (Join-Path $discordPath.FullName 'GPUCache')
+    ) | Where-Object { Test-PathExists $_ }
+    if ($paths.Count -eq 0) { return $null }
+    return (New-DeepCleanAggregateItem -Name 'Discord Cache' -Reason 'Discord cache and GPU cache' -Paths $paths -SubCategory 'Discord Cache')
+}
+
+function Get-NpmCacheItem {
+    $npmCache = Join-Path $env:LOCALAPPDATA 'npm-cache'
+    if (-not (Test-PathExists $npmCache)) { return $null }
+    return (New-DeepCleanAggregateItem -Name 'npm Cache' -Reason 'npm package download cache' -Paths @($npmCache) -SubCategory 'npm Cache')
+}
+
+function Get-PipCacheItem {
+    $pipCache = Join-Path $env:LOCALAPPDATA 'pip\cache'
+    if (-not (Test-PathExists $pipCache)) { return $null }
+    return (New-DeepCleanAggregateItem -Name 'pip Cache' -Reason 'pip package download cache' -Paths @($pipCache) -SubCategory 'pip Cache')
+}
+
+function Get-NuGetCacheItem {
+    $paths = @(
+        "$env:LOCALAPPDATA\NuGet\v3-cache",
+        "$env:LOCALAPPDATA\NuGet\plugins-cache"
+    ) | Where-Object { Test-PathExists $_ }
+    if ($paths.Count -eq 0) { return $null }
+    return (New-DeepCleanAggregateItem -Name 'NuGet Cache' -Reason 'NuGet package download cache' -Paths $paths -SubCategory 'NuGet Cache')
+}
+
 function Get-CategoryDefinitions {
     return @(
         [PSCustomObject]@{ Name = 'Temp Files'; Scanner = 'Get-TempFilesItem'; Group = 'Recommended'; Risk = 'Safe' },
@@ -1145,6 +1191,11 @@ function Get-CategoryDefinitions {
         [PSCustomObject]@{ Name = 'Startup Entries'; Scanner = 'Find-OrphanStartupEntries'; Group = 'Applications'; Risk = 'Review' },
         [PSCustomObject]@{ Name = 'Scheduled Tasks'; Scanner = 'Find-OrphanScheduledTasks'; Group = 'Applications'; Risk = 'Review' },
         [PSCustomObject]@{ Name = 'Broken Shortcuts'; Scanner = 'Find-BrokenShortcuts'; Group = 'Applications'; Risk = 'Review' },
+        [PSCustomObject]@{ Name = 'VS Code Cache'; Scanner = 'Get-VSCodeCacheItem'; Group = 'Applications'; Risk = 'Safe' },
+        [PSCustomObject]@{ Name = 'Discord Cache'; Scanner = 'Get-DiscordCacheItem'; Group = 'Applications'; Risk = 'Safe' },
+        [PSCustomObject]@{ Name = 'npm Cache'; Scanner = 'Get-NpmCacheItem'; Group = 'Applications'; Risk = 'Safe' },
+        [PSCustomObject]@{ Name = 'pip Cache'; Scanner = 'Get-PipCacheItem'; Group = 'Applications'; Risk = 'Safe' },
+        [PSCustomObject]@{ Name = 'NuGet Cache'; Scanner = 'Get-NuGetCacheItem'; Group = 'Applications'; Risk = 'Safe' },
         [PSCustomObject]@{ Name = 'Uninstall Keys'; Scanner = 'Find-OrphanUninstallKeys'; Group = 'Registry'; Risk = 'Advanced' },
         [PSCustomObject]@{ Name = 'COM/ActiveX'; Scanner = 'Find-BrokenComRegistrations'; Group = 'Registry'; Risk = 'Advanced' },
         [PSCustomObject]@{ Name = 'Services'; Scanner = 'Find-BrokenServiceEntries'; Group = 'Registry'; Risk = 'Advanced' },
