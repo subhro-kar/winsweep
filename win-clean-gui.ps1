@@ -776,9 +776,13 @@ function Find-BrokenShortcuts {
 
     foreach ($root in $scanRoots) {
         foreach ($lnk in (Get-ChildItem -LiteralPath $root -Filter '*.lnk' -Recurse -File -ErrorAction SilentlyContinue)) {
-            $shell = New-Object -ComObject WScript.Shell
-            $shortcut = $shell.CreateShortcut($lnk.FullName)
-            $target = $shortcut.TargetPath
+            try {
+                $shell = New-Object -ComObject WScript.Shell
+                $shortcut = $shell.CreateShortcut($lnk.FullName)
+                $target = $shortcut.TargetPath
+            } catch {
+                continue
+            }
 
             if ([string]::IsNullOrWhiteSpace($target)) { continue }
             if (Test-PathExists $target) { continue }
