@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse version from tag
+        id: version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = $tag -replace '^v', ''
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Parse changelog for release notes
+        id: changelog
+        shell: pwsh
+        run: |
+          $content = Get-Content -LiteralPath CHANGELOG.md -Raw
+          $version = "${{ steps.version.outputs.version }}"
+
+          $pattern = "(?s)## \[$version\].*?(?=\n## \[|\z)"
+          if ($content -match $pattern) {
+            $notes = $Matches[0].Trim()
+          } else {
+            $notes = "Release $version"
+          }
+
+          $notesPath = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+          $notes | Set-Content -LiteralPath $notesPath -Encoding UTF8
+          echo "notes_path=$notesPath" >> $env:GITHUB_OUTPUT
+
+      - name: Parse-check script
+        shell: pwsh
+        run: |
+          $null = [System.Management.Automation.PSParser]::Tokenize((Get-Content -LiteralPath 'win-clean-gui.ps1' -Raw), [ref]$null)
+          Write-Host "Parse check passed"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body_path: ${{ steps.changelog.outputs.notes_path }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') }}
+          files: |
+            win-clean-gui.ps1
