@@ -985,6 +985,32 @@ function Find-BrokenFontRegistrations {
     return $results
 }
 
+function Find-StaleDownloads {
+    $results = [System.Collections.Generic.List[object]]::new()
+
+    $downloadsPath = [System.Environment]::GetFolderPath('UserProfile')
+    if (-not $downloadsPath) { return $results }
+    $downloadsPath = Join-Path $downloadsPath 'Downloads'
+    if (-not (Test-PathExists $downloadsPath)) { return $results }
+
+    $staleExtensions = @('.exe', '.msi', '.msix', '.msu', '.7z', '.zip', '.rar')
+    $cutoffDate = (Get-Date).AddDays(-30)
+
+    foreach ($file in (Get-ChildItem -LiteralPath $downloadsPath -File -ErrorAction SilentlyContinue)) {
+        if ($file.LastWriteTime -ge $cutoffDate) { continue }
+        if ($staleExtensions -notcontains $file.Extension.ToLowerInvariant()) { continue }
+
+        $sizeStr = if ($file.Length -gt 1MB) { Format-Bytes -Bytes $file.Length } else { '' }
+        $results.Add((New-ScanResult -Category 'Recommended' -SubCategory 'Stale Downloads' -Name $file.Name `
+            -PathOrKey $file.FullName -Reason "Downloaded installer older than 30 days ($($file.LastWriteTime.ToString('yyyy-MM-dd')))" -Size $sizeStr -DeleteMeta @{
+                Type = 'FilesystemPath'
+                Path = $file.FullName
+            }))
+    }
+
+    return $results
+}
+
 function New-DeepCleanAggregateItem {
     param(
         [string]$Name,
@@ -1107,6 +1133,7 @@ function Get-CategoryDefinitions {
         [PSCustomObject]@{ Name = 'Log Files'; Scanner = 'Get-LogFilesItem'; Group = 'Recommended'; Risk = 'Safe' },
         [PSCustomObject]@{ Name = 'WER/Crash Dumps'; Scanner = 'Get-WerItem'; Group = 'Recommended'; Risk = 'Safe' },
         [PSCustomObject]@{ Name = 'Recycle Bin'; Scanner = 'Get-RecycleBinItem'; Group = 'Recommended'; Risk = 'Safe' },
+        [PSCustomObject]@{ Name = 'Stale Downloads'; Scanner = 'Find-StaleDownloads'; Group = 'Recommended'; Risk = 'Review' },
         [PSCustomObject]@{ Name = 'Windows Update Cache'; Scanner = 'Get-WindowsUpdateCacheItem'; Group = 'System'; Risk = 'Review' },
         [PSCustomObject]@{ Name = 'Delivery Optimization'; Scanner = 'Get-DeliveryOptimizationItem'; Group = 'System'; Risk = 'Review' },
         [PSCustomObject]@{ Name = 'DirectX Shader Cache'; Scanner = 'Get-DirectXShaderCacheItem'; Group = 'System'; Risk = 'Review' },
