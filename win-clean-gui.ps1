@@ -1001,6 +1001,11 @@ function Get-PrefetchItem {
     return (New-DeepCleanAggregateItem -Name 'Prefetch' -Reason 'Prefetch cache files' -Paths $paths -SubCategory 'Prefetch')
 }
 
+function Get-DeliveryOptimizationItem {
+    $paths = @('C:\Windows\SoftwareDistribution\DeliveryOptimization')
+    return (New-DeepCleanAggregateItem -Name 'Delivery Optimization' -Reason 'Windows Delivery Optimization cache' -Paths $paths -SubCategory 'Delivery Optimization')
+}
+
 function Get-ThumbnailCacheItem {
     $explorer = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\Explorer'
     if (-not (Test-PathExists $explorer)) { return $null }
@@ -1043,6 +1048,7 @@ function Get-CategoryDefinitions {
         [PSCustomObject]@{ Name = 'WER/Crash Dumps'; Scanner = 'Get-WerItem'; Group = 'Recommended'; Risk = 'Safe' },
         [PSCustomObject]@{ Name = 'Recycle Bin'; Scanner = 'Get-RecycleBinItem'; Group = 'Recommended'; Risk = 'Safe' },
         [PSCustomObject]@{ Name = 'Windows Update Cache'; Scanner = 'Get-WindowsUpdateCacheItem'; Group = 'System'; Risk = 'Review' },
+        [PSCustomObject]@{ Name = 'Delivery Optimization'; Scanner = 'Get-DeliveryOptimizationItem'; Group = 'System'; Risk = 'Review' },
         [PSCustomObject]@{ Name = 'Prefetch'; Scanner = 'Get-PrefetchItem'; Group = 'System'; Risk = 'Review' },
         [PSCustomObject]@{ Name = 'Orphaned Folders'; Scanner = 'Find-OrphanFilesystemFolders'; Group = 'Applications'; Risk = 'Review' },
         [PSCustomObject]@{ Name = 'Startup Entries'; Scanner = 'Find-OrphanStartupEntries'; Group = 'Applications'; Risk = 'Review' },
