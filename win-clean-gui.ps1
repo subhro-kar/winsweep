@@ -794,6 +794,8 @@ function Find-BrokenShortcuts {
 
     return $results
 }
+
+function Find-BrokenComRegistrations {
     $results = [System.Collections.Generic.List[object]]::new()
     $clsidRoot = 'HKCR:\CLSID'
     if (-not (Test-Path $clsidRoot)) { return $results }
