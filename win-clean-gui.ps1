@@ -774,10 +774,11 @@ function Find-BrokenShortcuts {
         [System.Environment]::GetFolderPath('SendTo')
     ) | Where-Object { $_ -and (Test-PathExists $_) } | Select-Object -Unique
 
+    $shell = New-Object -ComObject WScript.Shell
+
     foreach ($root in $scanRoots) {
         foreach ($lnk in (Get-ChildItem -LiteralPath $root -Filter '*.lnk' -Recurse -File -ErrorAction SilentlyContinue)) {
             try {
-                $shell = New-Object -ComObject WScript.Shell
                 $shortcut = $shell.CreateShortcut($lnk.FullName)
                 $target = $shortcut.TargetPath
             } catch {
@@ -785,8 +786,9 @@ function Find-BrokenShortcuts {
             }
 
             if ([string]::IsNullOrWhiteSpace($target)) { continue }
-            if (Test-PathExists $target) { continue }
             if ($target -match '^https?://') { continue }
+            $expandedTarget = [System.Environment]::ExpandEnvironmentVariables($target)
+            if (Test-PathExists $expandedTarget) { continue }
 
             $results.Add((New-ScanResult -Category 'Application' -SubCategory 'Broken Shortcuts' -Name $lnk.Name `
                 -PathOrKey $lnk.FullName -Reason "Target not found: $target" -DeleteMeta @{
@@ -1049,9 +1051,9 @@ function Get-RecycleBinItem {
     foreach ($item in $bin.Items()) {
         try { $sizeBytes += [Int64]$item.Size } catch { }
     }
-    if ($sizeBytes -le 0) { return $null }
+    $sizeStr = if ($sizeBytes -gt 0) { Format-Bytes -Bytes $sizeBytes } else { 'Unknown' }
     return (New-ScanResult -Category 'Deep Clean' -SubCategory 'Recycle Bin' -Name 'Recycle Bin' -PathOrKey 'shell:RecycleBinFolder' `
-        -Reason "$count item(s) in Recycle Bin" -Size (Format-Bytes -Bytes $sizeBytes) -DeleteMeta @{
+        -Reason "$count item(s) in Recycle Bin" -Size $sizeStr -DeleteMeta @{
             Type = 'RecycleBin'
             SizeBytes = $sizeBytes
         })
@@ -1088,8 +1090,8 @@ function Get-DefenderHistoryItem {
 }
 
 function Get-OldWUBackupsItem {
-    $paths = @('C:\Windows\SoftwareDistribution\Download', 'C:\Windows\WinSxS\CleanupManifests')
-    return (New-DeepCleanAggregateItem -Name 'Old WU Backups' -Reason 'Old Windows Update backup and cleanup manifest files' -Paths $paths -SubCategory 'Old WU Backups')
+    $paths = @('C:\Windows\SoftwareDistribution\Download')
+    return (New-DeepCleanAggregateItem -Name 'Old WU Backups' -Reason 'Old Windows Update download cache' -Paths $paths -SubCategory 'Old WU Backups')
 }
 
 function Get-ThumbnailCacheItem {
@@ -1139,7 +1141,7 @@ function Get-VSCodeCacheItem {
 }
 
 function Get-DiscordCacheItem {
-    $discordPath = Get-ChildItem -LiteralPath "$env:LOCALAPPDATA\Discord" -Filter 'app-*' -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
+    $discordPath = Get-ChildItem -LiteralPath "$env:LOCALAPPDATA\Discord" -Filter 'app-*' -Directory -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if (-not $discordPath) { return $null }
     $paths = @(
         (Join-Path $discordPath.FullName 'Cache'),
