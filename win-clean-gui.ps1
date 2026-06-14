@@ -1011,6 +1011,11 @@ function Get-DirectXShaderCacheItem {
     return (New-DeepCleanAggregateItem -Name 'DirectX Shader Cache' -Reason 'DirectX shader cache files' -Paths $paths -SubCategory 'DirectX Shader Cache')
 }
 
+function Get-MicrosoftStoreCacheItem {
+    $paths = @("$env:LOCALAPPDATA\Packages\Microsoft.WindowsStore_8wekyb3d8bbwe\LocalCache", "$env:LOCALAPPDATA\Packages\Microsoft.WindowsStore_8wekyb3d8bbwe\Settings")
+    return (New-DeepCleanAggregateItem -Name 'Microsoft Store Cache' -Reason 'Microsoft Store local cache and settings' -Paths $paths -SubCategory 'Microsoft Store Cache')
+}
+
 function Get-ThumbnailCacheItem {
     $explorer = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\Explorer'
     if (-not (Test-PathExists $explorer)) { return $null }
@@ -1055,6 +1060,7 @@ function Get-CategoryDefinitions {
         [PSCustomObject]@{ Name = 'Windows Update Cache'; Scanner = 'Get-WindowsUpdateCacheItem'; Group = 'System'; Risk = 'Review' },
         [PSCustomObject]@{ Name = 'Delivery Optimization'; Scanner = 'Get-DeliveryOptimizationItem'; Group = 'System'; Risk = 'Review' },
         [PSCustomObject]@{ Name = 'DirectX Shader Cache'; Scanner = 'Get-DirectXShaderCacheItem'; Group = 'System'; Risk = 'Review' },
+        [PSCustomObject]@{ Name = 'Microsoft Store Cache'; Scanner = 'Get-MicrosoftStoreCacheItem'; Group = 'System'; Risk = 'Review' },
         [PSCustomObject]@{ Name = 'Prefetch'; Scanner = 'Get-PrefetchItem'; Group = 'System'; Risk = 'Review' },
         [PSCustomObject]@{ Name = 'Orphaned Folders'; Scanner = 'Find-OrphanFilesystemFolders'; Group = 'Applications'; Risk = 'Review' },
         [PSCustomObject]@{ Name = 'Startup Entries'; Scanner = 'Find-OrphanStartupEntries'; Group = 'Applications'; Risk = 'Review' },
