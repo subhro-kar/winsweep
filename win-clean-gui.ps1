@@ -974,6 +974,23 @@ function Get-WindowsUpdateCacheItem {
     return (New-DeepCleanAggregateItem -Name 'Windows Update Cache' -Reason 'Downloaded update packages cache' -Paths $paths -SubCategory 'Windows Update Cache')
 }
 
+function Get-RecycleBinItem {
+    $shell = New-Object -ComObject Shell.Application
+    $bin = $shell.NameSpace(0x0A)
+    $count = $bin.Items().Count
+    if ($count -le 0) { return $null }
+    $sizeBytes = 0L
+    foreach ($item in $bin.Items()) {
+        try { $sizeBytes += [Int64]$item.Size } catch { }
+    }
+    if ($sizeBytes -le 0) { return $null }
+    return (New-ScanResult -Category 'Deep Clean' -SubCategory 'Recycle Bin' -Name 'Recycle Bin' -PathOrKey 'shell:RecycleBinFolder' `
+        -Reason "$count item(s) in Recycle Bin" -Size (Format-Bytes -Bytes $sizeBytes) -DeleteMeta @{
+            Type = 'RecycleBin'
+            SizeBytes = $sizeBytes
+        })
+}
+
 function Get-WerItem {
     $paths = @('C:\ProgramData\Microsoft\Windows\WER', "$env:LOCALAPPDATA\Microsoft\Windows\WER")
     return (New-DeepCleanAggregateItem -Name 'WER / Crash Dumps' -Reason 'Windows Error Reporting leftovers' -Paths $paths -SubCategory 'WER/Crash Dumps')
@@ -1024,6 +1041,7 @@ function Get-CategoryDefinitions {
         [PSCustomObject]@{ Name = 'Browser Caches'; Scanner = 'Get-BrowserCacheItem'; Group = 'Recommended'; Risk = 'Safe' },
         [PSCustomObject]@{ Name = 'Log Files'; Scanner = 'Get-LogFilesItem'; Group = 'Recommended'; Risk = 'Safe' },
         [PSCustomObject]@{ Name = 'WER/Crash Dumps'; Scanner = 'Get-WerItem'; Group = 'Recommended'; Risk = 'Safe' },
+        [PSCustomObject]@{ Name = 'Recycle Bin'; Scanner = 'Get-RecycleBinItem'; Group = 'Recommended'; Risk = 'Safe' },
         [PSCustomObject]@{ Name = 'Windows Update Cache'; Scanner = 'Get-WindowsUpdateCacheItem'; Group = 'System'; Risk = 'Review' },
         [PSCustomObject]@{ Name = 'Prefetch'; Scanner = 'Get-PrefetchItem'; Group = 'System'; Risk = 'Review' },
         [PSCustomObject]@{ Name = 'Orphaned Folders'; Scanner = 'Find-OrphanFilesystemFolders'; Group = 'Applications'; Risk = 'Review' },
@@ -1811,6 +1829,10 @@ $btnClean.Add_Click({
                         }
                     }
                     $line = "PROCESSED Deep clean category: $($item.Name)"
+                }
+                'RecycleBin' {
+                    Clear-RecycleBin -Force -ErrorAction Stop
+                    $line = "EMPTIED Recycle Bin"
                 }
                 default {
                     $line = "SKIPPED Unknown delete type: $($meta.Type)"
