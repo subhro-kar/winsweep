@@ -759,7 +759,41 @@ function Find-OrphanFilesystemFolders {
     return $results
 }
 
-function Find-BrokenComRegistrations {
+function Find-BrokenShortcuts {
+    $results = [System.Collections.Generic.List[object]]::new()
+
+    $scanRoots = @(
+        [System.Environment]::GetFolderPath('Desktop'),
+        [System.Environment]::GetFolderPath('DesktopDirectory'),
+        [System.Environment]::GetFolderPath('CommonDesktopDirectory'),
+        [System.Environment]::GetFolderPath('StartMenu'),
+        [System.Environment]::GetFolderPath('CommonStartMenu'),
+        [System.Environment]::GetFolderPath('Programs'),
+        [System.Environment]::GetFolderPath('CommonPrograms'),
+        [System.Environment]::GetFolderPath('Recent'),
+        [System.Environment]::GetFolderPath('SendTo')
+    ) | Where-Object { $_ -and (Test-PathExists $_) } | Select-Object -Unique
+
+    foreach ($root in $scanRoots) {
+        foreach ($lnk in (Get-ChildItem -LiteralPath $root -Filter '*.lnk' -Recurse -File -ErrorAction SilentlyContinue)) {
+            $shell = New-Object -ComObject WScript.Shell
+            $shortcut = $shell.CreateShortcut($lnk.FullName)
+            $target = $shortcut.TargetPath
+
+            if ([string]::IsNullOrWhiteSpace($target)) { continue }
+            if (Test-PathExists $target) { continue }
+            if ($target -match '^https?://') { continue }
+
+            $results.Add((New-ScanResult -Category 'Application' -SubCategory 'Broken Shortcuts' -Name $lnk.Name `
+                -PathOrKey $lnk.FullName -Reason "Target not found: $target" -DeleteMeta @{
+                    Type = 'FilesystemPath'
+                    Path = $lnk.FullName
+                }))
+        }
+    }
+
+    return $results
+}
     $results = [System.Collections.Generic.List[object]]::new()
     $clsidRoot = 'HKCR:\CLSID'
     if (-not (Test-Path $clsidRoot)) { return $results }
@@ -1077,6 +1111,7 @@ function Get-CategoryDefinitions {
         [PSCustomObject]@{ Name = 'Orphaned Folders'; Scanner = 'Find-OrphanFilesystemFolders'; Group = 'Applications'; Risk = 'Review' },
         [PSCustomObject]@{ Name = 'Startup Entries'; Scanner = 'Find-OrphanStartupEntries'; Group = 'Applications'; Risk = 'Review' },
         [PSCustomObject]@{ Name = 'Scheduled Tasks'; Scanner = 'Find-OrphanScheduledTasks'; Group = 'Applications'; Risk = 'Review' },
+        [PSCustomObject]@{ Name = 'Broken Shortcuts'; Scanner = 'Find-BrokenShortcuts'; Group = 'Applications'; Risk = 'Review' },
         [PSCustomObject]@{ Name = 'Uninstall Keys'; Scanner = 'Find-OrphanUninstallKeys'; Group = 'Registry'; Risk = 'Advanced' },
         [PSCustomObject]@{ Name = 'COM/ActiveX'; Scanner = 'Find-BrokenComRegistrations'; Group = 'Registry'; Risk = 'Advanced' },
         [PSCustomObject]@{ Name = 'Services'; Scanner = 'Find-BrokenServiceEntries'; Group = 'Registry'; Risk = 'Advanced' },
