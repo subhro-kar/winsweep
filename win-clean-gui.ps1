@@ -759,6 +759,48 @@ function Find-OrphanFilesystemFolders {
     return $results
 }
 
+function Find-BrokenShortcuts {
+    $results = [System.Collections.Generic.List[object]]::new()
+
+    $scanRoots = @(
+        [System.Environment]::GetFolderPath('Desktop'),
+        [System.Environment]::GetFolderPath('DesktopDirectory'),
+        [System.Environment]::GetFolderPath('CommonDesktopDirectory'),
+        [System.Environment]::GetFolderPath('StartMenu'),
+        [System.Environment]::GetFolderPath('CommonStartMenu'),
+        [System.Environment]::GetFolderPath('Programs'),
+        [System.Environment]::GetFolderPath('CommonPrograms'),
+        [System.Environment]::GetFolderPath('Recent'),
+        [System.Environment]::GetFolderPath('SendTo')
+    ) | Where-Object { $_ -and (Test-PathExists $_) } | Select-Object -Unique
+
+    $shell = New-Object -ComObject WScript.Shell
+
+    foreach ($root in $scanRoots) {
+        foreach ($lnk in (Get-ChildItem -LiteralPath $root -Filter '*.lnk' -Recurse -File -ErrorAction SilentlyContinue)) {
+            try {
+                $shortcut = $shell.CreateShortcut($lnk.FullName)
+                $target = $shortcut.TargetPath
+            } catch {
+                continue
+            }
+
+            if ([string]::IsNullOrWhiteSpace($target)) { continue }
+            if ($target -match '^https?://') { continue }
+            $expandedTarget = [System.Environment]::ExpandEnvironmentVariables($target)
+            if (Test-PathExists $expandedTarget) { continue }
+
+            $results.Add((New-ScanResult -Category 'Application' -SubCategory 'Broken Shortcuts' -Name $lnk.Name `
+                -PathOrKey $lnk.FullName -Reason "Target not found: $target" -DeleteMeta @{
+                    Type = 'FilesystemPath'
+                    Path = $lnk.FullName
+                }))
+        }
+    }
+
+    return $results
+}
+
 function Find-BrokenComRegistrations {
     $results = [System.Collections.Generic.List[object]]::new()
     $clsidRoot = 'HKCR:\CLSID'
@@ -945,6 +987,32 @@ function Find-BrokenFontRegistrations {
     return $results
 }
 
+function Find-StaleDownloads {
+    $results = [System.Collections.Generic.List[object]]::new()
+
+    $downloadsPath = [System.Environment]::GetFolderPath('UserProfile')
+    if (-not $downloadsPath) { return $results }
+    $downloadsPath = Join-Path $downloadsPath 'Downloads'
+    if (-not (Test-PathExists $downloadsPath)) { return $results }
+
+    $staleExtensions = @('.exe', '.msi', '.msix', '.msu', '.7z', '.zip', '.rar')
+    $cutoffDate = (Get-Date).AddDays(-30)
+
+    foreach ($file in (Get-ChildItem -LiteralPath $downloadsPath -File -ErrorAction SilentlyContinue)) {
+        if ($file.LastWriteTime -ge $cutoffDate) { continue }
+        if ($staleExtensions -notcontains $file.Extension.ToLowerInvariant()) { continue }
+
+        $sizeStr = if ($file.Length -gt 1MB) { Format-Bytes -Bytes $file.Length } else { '' }
+        $results.Add((New-ScanResult -Category 'Recommended' -SubCategory 'Stale Downloads' -Name $file.Name `
+            -PathOrKey $file.FullName -Reason "Downloaded installer older than 30 days ($($file.LastWriteTime.ToString('yyyy-MM-dd')))" -Size $sizeStr -DeleteMeta @{
+                Type = 'FilesystemPath'
+                Path = $file.FullName
+            }))
+    }
+
+    return $results
+}
+
 function New-DeepCleanAggregateItem {
     param(
         [string]$Name,
@@ -974,6 +1042,23 @@ function Get-WindowsUpdateCacheItem {
     return (New-DeepCleanAggregateItem -Name 'Windows Update Cache' -Reason 'Downloaded update packages cache' -Paths $paths -SubCategory 'Windows Update Cache')
 }
 
+function Get-RecycleBinItem {
+    $shell = New-Object -ComObject Shell.Application
+    $bin = $shell.NameSpace(0x0A)
+    $count = $bin.Items().Count
+    if ($count -le 0) { return $null }
+    $sizeBytes = 0L
+    foreach ($item in $bin.Items()) {
+        try { $sizeBytes += [Int64]$item.Size } catch { }
+    }
+    $sizeStr = if ($sizeBytes -gt 0) { Format-Bytes -Bytes $sizeBytes } else { 'Unknown' }
+    return (New-ScanResult -Category 'Deep Clean' -SubCategory 'Recycle Bin' -Name 'Recycle Bin' -PathOrKey 'shell:RecycleBinFolder' `
+        -Reason "$count item(s) in Recycle Bin" -Size $sizeStr -DeleteMeta @{
+            Type = 'RecycleBin'
+            SizeBytes = $sizeBytes
+        })
+}
+
 function Get-WerItem {
     $paths = @('C:\ProgramData\Microsoft\Windows\WER', "$env:LOCALAPPDATA\Microsoft\Windows\WER")
     return (New-DeepCleanAggregateItem -Name 'WER / Crash Dumps' -Reason 'Windows Error Reporting leftovers' -Paths $paths -SubCategory 'WER/Crash Dumps')
@@ -982,6 +1067,31 @@ function Get-WerItem {
 function Get-PrefetchItem {
     $paths = @('C:\Windows\Prefetch')
     return (New-DeepCleanAggregateItem -Name 'Prefetch' -Reason 'Prefetch cache files' -Paths $paths -SubCategory 'Prefetch')
+}
+
+function Get-DeliveryOptimizationItem {
+    $paths = @('C:\Windows\SoftwareDistribution\DeliveryOptimization')
+    return (New-DeepCleanAggregateItem -Name 'Delivery Optimization' -Reason 'Windows Delivery Optimization cache' -Paths $paths -SubCategory 'Delivery Optimization')
+}
+
+function Get-DirectXShaderCacheItem {
+    $paths = @("$env:LOCALAPPDATA\D3DSCache", 'C:\Windows\System32\config\systemprofile\AppData\Local\D3DSCache')
+    return (New-DeepCleanAggregateItem -Name 'DirectX Shader Cache' -Reason 'DirectX shader cache files' -Paths $paths -SubCategory 'DirectX Shader Cache')
+}
+
+function Get-MicrosoftStoreCacheItem {
+    $paths = @("$env:LOCALAPPDATA\Packages\Microsoft.WindowsStore_8wekyb3d8bbwe\LocalCache", "$env:LOCALAPPDATA\Packages\Microsoft.WindowsStore_8wekyb3d8bbwe\Settings")
+    return (New-DeepCleanAggregateItem -Name 'Microsoft Store Cache' -Reason 'Microsoft Store local cache and settings' -Paths $paths -SubCategory 'Microsoft Store Cache')
+}
+
+function Get-DefenderHistoryItem {
+    $paths = @('C:\ProgramData\Microsoft\Windows Defender\Scans\History\Store', 'C:\ProgramData\Microsoft\Windows Defender\Scans\History\Service')
+    return (New-DeepCleanAggregateItem -Name 'Defender History/Logs' -Reason 'Windows Defender scan history and service logs' -Paths $paths -SubCategory 'Defender History/Logs')
+}
+
+function Get-OldWUBackupsItem {
+    $paths = @('C:\Windows\SoftwareDistribution\Download')
+    return (New-DeepCleanAggregateItem -Name 'Old WU Backups' -Reason 'Old Windows Update download cache' -Paths $paths -SubCategory 'Old WU Backups')
 }
 
 function Get-ThumbnailCacheItem {
@@ -1017,25 +1127,84 @@ function Get-LogFilesItem {
     return (New-DeepCleanAggregateItem -Name 'Log Files' -Reason 'System and crash logs' -Paths $paths -SubCategory 'Log Files')
 }
 
+function Get-VSCodeCacheItem {
+    $paths = @(
+        "$env:LOCALAPPDATA\Microsoft\vscode-cpptools",
+        "$env:LOCALAPPDATA\Microsoft\VS Code\Cache",
+        "$env:LOCALAPPDATA\Microsoft\VS Code\CachedData",
+        "$env:LOCALAPPDATA\Microsoft\VS Code\CachedExtensions",
+        "$env:LOCALAPPDATA\Microsoft\VS Code\CachedExtensionVSIXs",
+        "$env:LOCALAPPDATA\Microsoft\VS Code\logs"
+    ) | Where-Object { Test-PathExists $_ }
+    if ($paths.Count -eq 0) { return $null }
+    return (New-DeepCleanAggregateItem -Name 'VS Code Cache' -Reason 'VS Code extension cache and logs' -Paths $paths -SubCategory 'VS Code Cache')
+}
+
+function Get-DiscordCacheItem {
+    $discordPath = Get-ChildItem -LiteralPath "$env:LOCALAPPDATA\Discord" -Filter 'app-*' -Directory -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if (-not $discordPath) { return $null }
+    $paths = @(
+        (Join-Path $discordPath.FullName 'Cache'),
+        (Join-Path $discordPath.FullName 'Code Cache'),
+        (Join-Path $discordPath.FullName 'GPUCache')
+    ) | Where-Object { Test-PathExists $_ }
+    if ($paths.Count -eq 0) { return $null }
+    return (New-DeepCleanAggregateItem -Name 'Discord Cache' -Reason 'Discord cache and GPU cache' -Paths $paths -SubCategory 'Discord Cache')
+}
+
+function Get-NpmCacheItem {
+    $npmCache = Join-Path $env:LOCALAPPDATA 'npm-cache'
+    if (-not (Test-PathExists $npmCache)) { return $null }
+    return (New-DeepCleanAggregateItem -Name 'npm Cache' -Reason 'npm package download cache' -Paths @($npmCache) -SubCategory 'npm Cache')
+}
+
+function Get-PipCacheItem {
+    $pipCache = Join-Path $env:LOCALAPPDATA 'pip\cache'
+    if (-not (Test-PathExists $pipCache)) { return $null }
+    return (New-DeepCleanAggregateItem -Name 'pip Cache' -Reason 'pip package download cache' -Paths @($pipCache) -SubCategory 'pip Cache')
+}
+
+function Get-NuGetCacheItem {
+    $paths = @(
+        "$env:LOCALAPPDATA\NuGet\v3-cache",
+        "$env:LOCALAPPDATA\NuGet\plugins-cache"
+    ) | Where-Object { Test-PathExists $_ }
+    if ($paths.Count -eq 0) { return $null }
+    return (New-DeepCleanAggregateItem -Name 'NuGet Cache' -Reason 'NuGet package download cache' -Paths $paths -SubCategory 'NuGet Cache')
+}
+
 function Get-CategoryDefinitions {
     return @(
-        [PSCustomObject]@{ Name = 'Uninstall Keys'; Scanner = 'Find-OrphanUninstallKeys' },
-        [PSCustomObject]@{ Name = 'COM/ActiveX'; Scanner = 'Find-BrokenComRegistrations' },
-        [PSCustomObject]@{ Name = 'Services'; Scanner = 'Find-BrokenServiceEntries' },
-        [PSCustomObject]@{ Name = 'File Associations'; Scanner = 'Find-BrokenFileAssociations' },
-        [PSCustomObject]@{ Name = 'Shell Extensions'; Scanner = 'Find-BrokenShellExtensions' },
-        [PSCustomObject]@{ Name = 'App Paths'; Scanner = 'Find-BrokenAppPaths' },
-        [PSCustomObject]@{ Name = 'Fonts'; Scanner = 'Find-BrokenFontRegistrations' },
-        [PSCustomObject]@{ Name = 'Orphaned Folders'; Scanner = 'Find-OrphanFilesystemFolders' },
-        [PSCustomObject]@{ Name = 'Startup Entries'; Scanner = 'Find-OrphanStartupEntries' },
-        [PSCustomObject]@{ Name = 'Scheduled Tasks'; Scanner = 'Find-OrphanScheduledTasks' },
-        [PSCustomObject]@{ Name = 'Temp Files'; Scanner = 'Get-TempFilesItem' },
-        [PSCustomObject]@{ Name = 'Windows Update Cache'; Scanner = 'Get-WindowsUpdateCacheItem' },
-        [PSCustomObject]@{ Name = 'WER/Crash Dumps'; Scanner = 'Get-WerItem' },
-        [PSCustomObject]@{ Name = 'Prefetch'; Scanner = 'Get-PrefetchItem' },
-        [PSCustomObject]@{ Name = 'Thumbnail Cache'; Scanner = 'Get-ThumbnailCacheItem' },
-        [PSCustomObject]@{ Name = 'Browser Caches'; Scanner = 'Get-BrowserCacheItem' },
-        [PSCustomObject]@{ Name = 'Log Files'; Scanner = 'Get-LogFilesItem' }
+        [PSCustomObject]@{ Name = 'Temp Files'; Scanner = 'Get-TempFilesItem'; Group = 'Recommended'; Risk = 'Safe' },
+        [PSCustomObject]@{ Name = 'Thumbnail Cache'; Scanner = 'Get-ThumbnailCacheItem'; Group = 'Recommended'; Risk = 'Safe' },
+        [PSCustomObject]@{ Name = 'Browser Caches'; Scanner = 'Get-BrowserCacheItem'; Group = 'Recommended'; Risk = 'Safe' },
+        [PSCustomObject]@{ Name = 'Log Files'; Scanner = 'Get-LogFilesItem'; Group = 'Recommended'; Risk = 'Safe' },
+        [PSCustomObject]@{ Name = 'WER/Crash Dumps'; Scanner = 'Get-WerItem'; Group = 'Recommended'; Risk = 'Safe' },
+        [PSCustomObject]@{ Name = 'Recycle Bin'; Scanner = 'Get-RecycleBinItem'; Group = 'Recommended'; Risk = 'Safe' },
+        [PSCustomObject]@{ Name = 'Stale Downloads'; Scanner = 'Find-StaleDownloads'; Group = 'Recommended'; Risk = 'Review' },
+        [PSCustomObject]@{ Name = 'Windows Update Cache'; Scanner = 'Get-WindowsUpdateCacheItem'; Group = 'System'; Risk = 'Review' },
+        [PSCustomObject]@{ Name = 'Delivery Optimization'; Scanner = 'Get-DeliveryOptimizationItem'; Group = 'System'; Risk = 'Review' },
+        [PSCustomObject]@{ Name = 'DirectX Shader Cache'; Scanner = 'Get-DirectXShaderCacheItem'; Group = 'System'; Risk = 'Review' },
+        [PSCustomObject]@{ Name = 'Microsoft Store Cache'; Scanner = 'Get-MicrosoftStoreCacheItem'; Group = 'System'; Risk = 'Review' },
+        [PSCustomObject]@{ Name = 'Defender History/Logs'; Scanner = 'Get-DefenderHistoryItem'; Group = 'System'; Risk = 'Review' },
+        [PSCustomObject]@{ Name = 'Old WU Backups'; Scanner = 'Get-OldWUBackupsItem'; Group = 'System'; Risk = 'Review' },
+        [PSCustomObject]@{ Name = 'Prefetch'; Scanner = 'Get-PrefetchItem'; Group = 'System'; Risk = 'Review' },
+        [PSCustomObject]@{ Name = 'Orphaned Folders'; Scanner = 'Find-OrphanFilesystemFolders'; Group = 'Applications'; Risk = 'Review' },
+        [PSCustomObject]@{ Name = 'Startup Entries'; Scanner = 'Find-OrphanStartupEntries'; Group = 'Applications'; Risk = 'Review' },
+        [PSCustomObject]@{ Name = 'Scheduled Tasks'; Scanner = 'Find-OrphanScheduledTasks'; Group = 'Applications'; Risk = 'Review' },
+        [PSCustomObject]@{ Name = 'Broken Shortcuts'; Scanner = 'Find-BrokenShortcuts'; Group = 'Applications'; Risk = 'Review' },
+        [PSCustomObject]@{ Name = 'VS Code Cache'; Scanner = 'Get-VSCodeCacheItem'; Group = 'Applications'; Risk = 'Safe' },
+        [PSCustomObject]@{ Name = 'Discord Cache'; Scanner = 'Get-DiscordCacheItem'; Group = 'Applications'; Risk = 'Safe' },
+        [PSCustomObject]@{ Name = 'npm Cache'; Scanner = 'Get-NpmCacheItem'; Group = 'Applications'; Risk = 'Safe' },
+        [PSCustomObject]@{ Name = 'pip Cache'; Scanner = 'Get-PipCacheItem'; Group = 'Applications'; Risk = 'Safe' },
+        [PSCustomObject]@{ Name = 'NuGet Cache'; Scanner = 'Get-NuGetCacheItem'; Group = 'Applications'; Risk = 'Safe' },
+        [PSCustomObject]@{ Name = 'Uninstall Keys'; Scanner = 'Find-OrphanUninstallKeys'; Group = 'Registry'; Risk = 'Advanced' },
+        [PSCustomObject]@{ Name = 'COM/ActiveX'; Scanner = 'Find-BrokenComRegistrations'; Group = 'Registry'; Risk = 'Advanced' },
+        [PSCustomObject]@{ Name = 'Services'; Scanner = 'Find-BrokenServiceEntries'; Group = 'Registry'; Risk = 'Advanced' },
+        [PSCustomObject]@{ Name = 'File Associations'; Scanner = 'Find-BrokenFileAssociations'; Group = 'Registry'; Risk = 'Advanced' },
+        [PSCustomObject]@{ Name = 'Shell Extensions'; Scanner = 'Find-BrokenShellExtensions'; Group = 'Registry'; Risk = 'Advanced' },
+        [PSCustomObject]@{ Name = 'App Paths'; Scanner = 'Find-BrokenAppPaths'; Group = 'Registry'; Risk = 'Advanced' },
+        [PSCustomObject]@{ Name = 'Fonts'; Scanner = 'Find-BrokenFontRegistrations'; Group = 'Registry'; Risk = 'Review' }
     )
 }
 
@@ -1221,13 +1390,43 @@ $split.SplitterDistance = 260
 $split.Panel1MinSize = 220
 $split.Panel2Collapsed = $true
 
-$categories = New-Object System.Windows.Forms.CheckedListBox
-$categories.Dock = 'Fill'
-$categories.CheckOnClick = $true
-$categories.IntegralHeight = $false
+$groupOrder = @('Recommended', 'System', 'Applications', 'Registry')
+$groupDefaults = @{
+    'Recommended'  = $true
+    'System'       = $false
+    'Applications' = $false
+    'Registry'     = $false
+}
 
-foreach ($cat in (Get-CategoryDefinitions)) {
-    [void]$categories.Items.Add($cat.Name, $true)
+$tabControl = New-Object System.Windows.Forms.TabControl
+$tabControl.Dock = 'Fill'
+$tabControl.Alignment = 'Top'
+$tabControl.SizeMode = 'Normal'
+
+$script:categoryLists = @{}
+
+foreach ($groupName in $groupOrder) {
+    $tabPage = New-Object System.Windows.Forms.TabPage
+    $tabPage.Text = $groupName
+    $tabPage.UseVisualStyleBackColor = $true
+
+    $clb = New-Object System.Windows.Forms.CheckedListBox
+    $clb.Dock = 'Fill'
+    $clb.CheckOnClick = $true
+    $clb.IntegralHeight = $false
+
+    $defaultChecked = $groupDefaults[$groupName]
+
+    foreach ($cat in (Get-CategoryDefinitions | Where-Object { $_.Group -eq $groupName })) {
+        $label = $cat.Name
+        if ($cat.Risk -eq 'Advanced') { $label += "  [Advanced]" }
+        elseif ($cat.Risk -eq 'Review') { $label += "  [Review]" }
+        [void]$clb.Items.Add($label, $defaultChecked)
+    }
+
+    $script:categoryLists[$groupName] = $clb
+    $tabPage.Controls.Add($clb)
+    [void]$tabControl.TabPages.Add($tabPage)
 }
 
 $grid = New-Object System.Windows.Forms.DataGridView
@@ -1296,11 +1495,11 @@ function Add-ResultRow {
 
     $idx = $TargetGrid.Rows.Add($false, $Item.Category, $Item.Name, $Item.PathOrKey, $Item.Reason, $Item.Size)
     if ($Item.Category -eq 'Registry') {
-        $TargetGrid.Rows[$idx].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(245, 245, 245)
+        $TargetGrid.Rows[$idx].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(255, 235, 235)
     } elseif ($Item.Category -eq 'Application') {
         $TargetGrid.Rows[$idx].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(236, 246, 255)
     } elseif ($Item.Category -eq 'Deep Clean') {
-        $TargetGrid.Rows[$idx].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(255, 246, 232)
+        $TargetGrid.Rows[$idx].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(232, 245, 233)
     }
 }
 
@@ -1315,7 +1514,7 @@ $grid.Add_CellMouseEnter({
     }
 })
 
-$split.Panel1.Controls.Add($categories)
+$split.Panel1.Controls.Add($tabControl)
 $split.Panel2.Controls.Add($grid)
 
 $statusStrip = New-Object System.Windows.Forms.StatusStrip
@@ -1385,8 +1584,12 @@ $btnUndo.Add_Click({
 
 $btnScan.Add_Click({
     $selectedCategories = @()
-    foreach ($entry in $categories.CheckedItems) {
-        $selectedCategories += [string]$entry
+    foreach ($groupName in $groupOrder) {
+        $clb = $script:categoryLists[$groupName]
+        foreach ($item in $clb.CheckedItems) {
+            $cleanName = $item -replace '\s+\[(Advanced|Review|Admin|Safe)\]$', ''
+            $selectedCategories += $cleanName
+        }
     }
     if ($selectedCategories.Count -eq 0) {
         [System.Windows.Forms.MessageBox]::Show('Choose at least one category to scan.', 'Scan', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
@@ -1777,6 +1980,10 @@ $btnClean.Add_Click({
                         }
                     }
                     $line = "PROCESSED Deep clean category: $($item.Name)"
+                }
+                'RecycleBin' {
+                    Clear-RecycleBin -Force -ErrorAction Stop
+                    $line = "EMPTIED Recycle Bin"
                 }
                 default {
                     $line = "SKIPPED Unknown delete type: $($meta.Type)"
