@@ -1021,6 +1021,11 @@ function Get-DefenderHistoryItem {
     return (New-DeepCleanAggregateItem -Name 'Defender History/Logs' -Reason 'Windows Defender scan history and service logs' -Paths $paths -SubCategory 'Defender History/Logs')
 }
 
+function Get-OldWUBackupsItem {
+    $paths = @('C:\Windows\SoftwareDistribution\Download', 'C:\Windows\WinSxS\CleanupManifests')
+    return (New-DeepCleanAggregateItem -Name 'Old WU Backups' -Reason 'Old Windows Update backup and cleanup manifest files' -Paths $paths -SubCategory 'Old WU Backups')
+}
+
 function Get-ThumbnailCacheItem {
     $explorer = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\Explorer'
     if (-not (Test-PathExists $explorer)) { return $null }
@@ -1067,6 +1072,7 @@ function Get-CategoryDefinitions {
         [PSCustomObject]@{ Name = 'DirectX Shader Cache'; Scanner = 'Get-DirectXShaderCacheItem'; Group = 'System'; Risk = 'Review' },
         [PSCustomObject]@{ Name = 'Microsoft Store Cache'; Scanner = 'Get-MicrosoftStoreCacheItem'; Group = 'System'; Risk = 'Review' },
         [PSCustomObject]@{ Name = 'Defender History/Logs'; Scanner = 'Get-DefenderHistoryItem'; Group = 'System'; Risk = 'Review' },
+        [PSCustomObject]@{ Name = 'Old WU Backups'; Scanner = 'Get-OldWUBackupsItem'; Group = 'System'; Risk = 'Review' },
         [PSCustomObject]@{ Name = 'Prefetch'; Scanner = 'Get-PrefetchItem'; Group = 'System'; Risk = 'Review' },
         [PSCustomObject]@{ Name = 'Orphaned Folders'; Scanner = 'Find-OrphanFilesystemFolders'; Group = 'Applications'; Risk = 'Review' },
         [PSCustomObject]@{ Name = 'Startup Entries'; Scanner = 'Find-OrphanStartupEntries'; Group = 'Applications'; Risk = 'Review' },
