@@ -1019,23 +1019,23 @@ function Get-LogFilesItem {
 
 function Get-CategoryDefinitions {
     return @(
-        [PSCustomObject]@{ Name = 'Uninstall Keys'; Scanner = 'Find-OrphanUninstallKeys' },
-        [PSCustomObject]@{ Name = 'COM/ActiveX'; Scanner = 'Find-BrokenComRegistrations' },
-        [PSCustomObject]@{ Name = 'Services'; Scanner = 'Find-BrokenServiceEntries' },
-        [PSCustomObject]@{ Name = 'File Associations'; Scanner = 'Find-BrokenFileAssociations' },
-        [PSCustomObject]@{ Name = 'Shell Extensions'; Scanner = 'Find-BrokenShellExtensions' },
-        [PSCustomObject]@{ Name = 'App Paths'; Scanner = 'Find-BrokenAppPaths' },
-        [PSCustomObject]@{ Name = 'Fonts'; Scanner = 'Find-BrokenFontRegistrations' },
-        [PSCustomObject]@{ Name = 'Orphaned Folders'; Scanner = 'Find-OrphanFilesystemFolders' },
-        [PSCustomObject]@{ Name = 'Startup Entries'; Scanner = 'Find-OrphanStartupEntries' },
-        [PSCustomObject]@{ Name = 'Scheduled Tasks'; Scanner = 'Find-OrphanScheduledTasks' },
-        [PSCustomObject]@{ Name = 'Temp Files'; Scanner = 'Get-TempFilesItem' },
-        [PSCustomObject]@{ Name = 'Windows Update Cache'; Scanner = 'Get-WindowsUpdateCacheItem' },
-        [PSCustomObject]@{ Name = 'WER/Crash Dumps'; Scanner = 'Get-WerItem' },
-        [PSCustomObject]@{ Name = 'Prefetch'; Scanner = 'Get-PrefetchItem' },
-        [PSCustomObject]@{ Name = 'Thumbnail Cache'; Scanner = 'Get-ThumbnailCacheItem' },
-        [PSCustomObject]@{ Name = 'Browser Caches'; Scanner = 'Get-BrowserCacheItem' },
-        [PSCustomObject]@{ Name = 'Log Files'; Scanner = 'Get-LogFilesItem' }
+        [PSCustomObject]@{ Name = 'Temp Files'; Scanner = 'Get-TempFilesItem'; Group = 'Recommended'; Risk = 'Safe' },
+        [PSCustomObject]@{ Name = 'Thumbnail Cache'; Scanner = 'Get-ThumbnailCacheItem'; Group = 'Recommended'; Risk = 'Safe' },
+        [PSCustomObject]@{ Name = 'Browser Caches'; Scanner = 'Get-BrowserCacheItem'; Group = 'Recommended'; Risk = 'Safe' },
+        [PSCustomObject]@{ Name = 'Log Files'; Scanner = 'Get-LogFilesItem'; Group = 'Recommended'; Risk = 'Safe' },
+        [PSCustomObject]@{ Name = 'WER/Crash Dumps'; Scanner = 'Get-WerItem'; Group = 'Recommended'; Risk = 'Safe' },
+        [PSCustomObject]@{ Name = 'Windows Update Cache'; Scanner = 'Get-WindowsUpdateCacheItem'; Group = 'System'; Risk = 'Review' },
+        [PSCustomObject]@{ Name = 'Prefetch'; Scanner = 'Get-PrefetchItem'; Group = 'System'; Risk = 'Review' },
+        [PSCustomObject]@{ Name = 'Orphaned Folders'; Scanner = 'Find-OrphanFilesystemFolders'; Group = 'Applications'; Risk = 'Review' },
+        [PSCustomObject]@{ Name = 'Startup Entries'; Scanner = 'Find-OrphanStartupEntries'; Group = 'Applications'; Risk = 'Review' },
+        [PSCustomObject]@{ Name = 'Scheduled Tasks'; Scanner = 'Find-OrphanScheduledTasks'; Group = 'Applications'; Risk = 'Review' },
+        [PSCustomObject]@{ Name = 'Uninstall Keys'; Scanner = 'Find-OrphanUninstallKeys'; Group = 'Registry'; Risk = 'Advanced' },
+        [PSCustomObject]@{ Name = 'COM/ActiveX'; Scanner = 'Find-BrokenComRegistrations'; Group = 'Registry'; Risk = 'Advanced' },
+        [PSCustomObject]@{ Name = 'Services'; Scanner = 'Find-BrokenServiceEntries'; Group = 'Registry'; Risk = 'Advanced' },
+        [PSCustomObject]@{ Name = 'File Associations'; Scanner = 'Find-BrokenFileAssociations'; Group = 'Registry'; Risk = 'Advanced' },
+        [PSCustomObject]@{ Name = 'Shell Extensions'; Scanner = 'Find-BrokenShellExtensions'; Group = 'Registry'; Risk = 'Advanced' },
+        [PSCustomObject]@{ Name = 'App Paths'; Scanner = 'Find-BrokenAppPaths'; Group = 'Registry'; Risk = 'Advanced' },
+        [PSCustomObject]@{ Name = 'Fonts'; Scanner = 'Find-BrokenFontRegistrations'; Group = 'Registry'; Risk = 'Review' }
     )
 }
 
@@ -1221,13 +1221,43 @@ $split.SplitterDistance = 260
 $split.Panel1MinSize = 220
 $split.Panel2Collapsed = $true
 
-$categories = New-Object System.Windows.Forms.CheckedListBox
-$categories.Dock = 'Fill'
-$categories.CheckOnClick = $true
-$categories.IntegralHeight = $false
+$groupOrder = @('Recommended', 'System', 'Applications', 'Registry')
+$groupDefaults = @{
+    'Recommended'  = $true
+    'System'       = $false
+    'Applications' = $false
+    'Registry'     = $false
+}
 
-foreach ($cat in (Get-CategoryDefinitions)) {
-    [void]$categories.Items.Add($cat.Name, $true)
+$tabControl = New-Object System.Windows.Forms.TabControl
+$tabControl.Dock = 'Fill'
+$tabControl.Alignment = 'Top'
+$tabControl.SizeMode = 'Normal'
+
+$script:categoryLists = @{}
+
+foreach ($groupName in $groupOrder) {
+    $tabPage = New-Object System.Windows.Forms.TabPage
+    $tabPage.Text = $groupName
+    $tabPage.UseVisualStyleBackColor = $true
+
+    $clb = New-Object System.Windows.Forms.CheckedListBox
+    $clb.Dock = 'Fill'
+    $clb.CheckOnClick = $true
+    $clb.IntegralHeight = $false
+
+    $defaultChecked = $groupDefaults[$groupName]
+
+    foreach ($cat in (Get-CategoryDefinitions | Where-Object { $_.Group -eq $groupName })) {
+        $label = $cat.Name
+        if ($cat.Risk -eq 'Advanced') { $label += "  [Advanced]" }
+        elseif ($cat.Risk -eq 'Review') { $label += "  [Review]" }
+        [void]$clb.Items.Add($label, $defaultChecked)
+    }
+
+    $script:categoryLists[$groupName] = $clb
+    $tabPage.Controls.Add($clb)
+    [void]$tabControl.TabPages.Add($tabPage)
 }
 
 $grid = New-Object System.Windows.Forms.DataGridView
@@ -1296,11 +1326,11 @@ function Add-ResultRow {
 
     $idx = $TargetGrid.Rows.Add($false, $Item.Category, $Item.Name, $Item.PathOrKey, $Item.Reason, $Item.Size)
     if ($Item.Category -eq 'Registry') {
-        $TargetGrid.Rows[$idx].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(245, 245, 245)
+        $TargetGrid.Rows[$idx].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(255, 235, 235)
     } elseif ($Item.Category -eq 'Application') {
         $TargetGrid.Rows[$idx].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(236, 246, 255)
     } elseif ($Item.Category -eq 'Deep Clean') {
-        $TargetGrid.Rows[$idx].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(255, 246, 232)
+        $TargetGrid.Rows[$idx].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(232, 245, 233)
     }
 }
 
@@ -1315,7 +1345,7 @@ $grid.Add_CellMouseEnter({
     }
 })
 
-$split.Panel1.Controls.Add($categories)
+$split.Panel1.Controls.Add($tabControl)
 $split.Panel2.Controls.Add($grid)
 
 $statusStrip = New-Object System.Windows.Forms.StatusStrip
@@ -1385,8 +1415,12 @@ $btnUndo.Add_Click({
 
 $btnScan.Add_Click({
     $selectedCategories = @()
-    foreach ($entry in $categories.CheckedItems) {
-        $selectedCategories += [string]$entry
+    foreach ($groupName in $groupOrder) {
+        $clb = $script:categoryLists[$groupName]
+        foreach ($item in $clb.CheckedItems) {
+            $cleanName = $item -replace '\s+\[(Advanced|Review|Admin|Safe)\]$', ''
+            $selectedCategories += $cleanName
+        }
     }
     if ($selectedCategories.Count -eq 0) {
         [System.Windows.Forms.MessageBox]::Show('Choose at least one category to scan.', 'Scan', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
