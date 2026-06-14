@@ -15,15 +15,21 @@ $ErrorActionPreference = 'SilentlyContinue'
 $script:WinCleanEntryScript = $PSCommandPath
 $script:WinCleanRoot = $PSScriptRoot
 
-. (Join-Path $PSScriptRoot 'src\Core\Helpers.ps1')
-. (Join-Path $PSScriptRoot 'src\Core\Admin.ps1')
-. (Join-Path $PSScriptRoot 'src\Models\ScanResult.ps1')
-. (Join-Path $PSScriptRoot 'src\Scanners\Registry.ps1')
-. (Join-Path $PSScriptRoot 'src\Scanners\Applications.ps1')
-. (Join-Path $PSScriptRoot 'src\Scanners\DeepClean.ps1')
-. (Join-Path $PSScriptRoot 'src\Categories.ps1')
-. (Join-Path $PSScriptRoot 'src\Cleanup\Recovery.ps1')
-. (Join-Path $PSScriptRoot 'src\Ui\Grid.ps1')
+$previousErrorActionPreference = $ErrorActionPreference
+$ErrorActionPreference = 'Stop'
+try {
+    . (Join-Path $PSScriptRoot 'src\Core\Helpers.ps1')
+    . (Join-Path $PSScriptRoot 'src\Core\Admin.ps1')
+    . (Join-Path $PSScriptRoot 'src\Models\ScanResult.ps1')
+    . (Join-Path $PSScriptRoot 'src\Scanners\Registry.ps1')
+    . (Join-Path $PSScriptRoot 'src\Scanners\Applications.ps1')
+    . (Join-Path $PSScriptRoot 'src\Scanners\DeepClean.ps1')
+    . (Join-Path $PSScriptRoot 'src\Categories.ps1')
+    . (Join-Path $PSScriptRoot 'src\Cleanup\Recovery.ps1')
+    . (Join-Path $PSScriptRoot 'src\Ui\Grid.ps1')
+} finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+}
 
 if (-not (Ensure-LaunchMode)) {
     return
