@@ -1609,7 +1609,6 @@ $btnSelectNone.Add_Click({
 $btnOpenBackup.Add_Click({
     Start-Process explorer.exe $PSScriptRoot
 })
-})
 
 $btnUndo.Add_Click({
     Show-UndoDialog -BackupDir $PSScriptRoot
