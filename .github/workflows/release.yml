@@ -50,3 +50,4 @@ jobs:
           prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') }}
           files: |
             winsweep.ps1
+            Run WinSweep.cmd

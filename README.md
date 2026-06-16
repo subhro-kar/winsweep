@@ -6,7 +6,7 @@ A Windows system cleanup utility with a tabbed WinForms GUI. Scans for orphaned 
 
 - **Tabbed categories** — Recommended (safe defaults), System, Applications, Registry
 - **Risk badges** — `[Safe]`, `[Review]`, `[Advanced]` on every category
-- **22 scan categories** including app presets (VS Code, Discord, npm, pip, NuGet)
+- **30 scan categories** including app presets (VS Code, Discord, npm, pip, NuGet)
 - **3-layer recovery** — System Restore Point, `.reg` backup, Recycle Bin move
 - **Undo dialog** — re-import registry backups, open Recycle Bin
 - **Admin detection** — elevation prompt at startup, limited-mode banner
