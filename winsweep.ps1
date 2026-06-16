@@ -1687,7 +1687,10 @@ $btnScan.Add_Click({
 
     $script:scanResults = [System.Collections.Generic.List[object]]::new()
     $script:scanErrors = [System.Collections.Generic.List[string]]::new()
-    $script:scanProgress = @{ Done = 0; CurrentCategory = '' }
+    $script:scanRunspaceProgress = [System.Collections.Concurrent.ConcurrentDictionary[string,object]]::new()
+    $script:scanRunspaceProgress['Done'] = 0
+    $script:scanRunspaceProgress['CurrentCategory'] = ''
+    $script:scanRunspaceProgress['ItemCount'] = 0
 
     $runspace = [runspacefactory]::Create()
     $runspace.ApartmentState = 'STA'
@@ -1701,39 +1704,40 @@ $btnScan.Add_Click({
     $scannerNames = $definitions | ForEach-Object { $_.Scanner }
 
     [void]$powershell.AddScript({
-        param($cats, $scanners, $cancelRef)
+        param($cats, $scanners, $progress)
         $results = [System.Collections.Generic.List[object]]::new()
         $errors = [System.Collections.Generic.List[string]]::new()
-        $progress = @{ Done = 0; CurrentCategory = '' }
 
         for ($i = 0; $i -lt $cats.Count; $i++) {
-            if ($cancelRef.Value) { break }
-            $progress.CurrentCategory = $cats[$i]
-            $progress.Done = $i
+            $progress['CurrentCategory'] = $cats[$i]
+            $progress['Done'] = $i
 
             try {
                 $scanFn = Get-Command -Name $scanners[$i] -ErrorAction SilentlyContinue
                 if (-not $scanFn) { continue }
                 $scanOut = & $scanners[$i]
+                $count = 0
                 if ($scanOut -is [System.Collections.IEnumerable]) {
                     foreach ($item in $scanOut) {
-                        if ($null -ne $item) { $results.Add($item) }
+                        if ($null -ne $item) {
+                            $results.Add($item)
+                            $count++
+                        }
                     }
                 } elseif ($null -ne $scanOut) {
                     $results.Add($scanOut)
+                    $count = 1
                 }
+                $progress['ItemCount'] = [int]$progress['ItemCount'] + $count
             } catch {
                 $errors.Add("$($cats[$i]): $($_.Exception.Message)")
             }
         }
-        $progress.Done = $cats.Count
-        $progress.CurrentCategory = ''
+        $progress['Done'] = $cats.Count
+        $progress['CurrentCategory'] = ''
 
-        return @{ Results = $results; Errors = $errors; Progress = $progress }
-    }).AddArgument($categoryNames).AddArgument($scannerNames)
-
-    $cancelRef = [ref]$script:scanCancelRequested
-    $powershell.Runspace.SessionStateProxy.SetVariable('cancelRef', $cancelRef)
+        return @{ Results = $results; Errors = $errors }
+    }).AddArgument($categoryNames).AddArgument($scannerNames).AddArgument($script:scanRunspaceProgress)
 
     $asyncResult = $powershell.BeginInvoke()
 
@@ -1741,11 +1745,14 @@ $btnScan.Add_Click({
     $script:scanTimer.Interval = 200
 
     $script:scanTimer.Add_Tick({
-        if ($null -ne $script:scanProgress) {
-            $toolProgress.Value = [Math]::Min($toolProgress.Maximum, $script:scanProgress.Done + 1)
-            if ($script:scanProgress.CurrentCategory) {
-                $toolStatus.Text = "Scanning: $($script:scanProgress.CurrentCategory)..."
-            }
+        $currentCat = [string]$script:scanRunspaceProgress['CurrentCategory']
+        $done = [int]$script:scanRunspaceProgress['Done']
+        $itemCount = [int]$script:scanRunspaceProgress['ItemCount']
+
+        $toolProgress.Value = [Math]::Min($toolProgress.Maximum, $done + 1)
+        if ($currentCat) {
+            $toolStatus.Text = "Scanning: $currentCat ($itemCount found)..."
+            $statCounts.Text = "Scanning... | $itemCount item(s) found so far"
         }
 
         if ($asyncResult.IsCompleted) {
