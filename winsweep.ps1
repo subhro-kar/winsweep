@@ -1344,7 +1344,6 @@ $toolStrip.GripStyle = 'Hidden'
 $toolStrip.Dock = 'Top'
 
 $btnScan = New-Object System.Windows.Forms.ToolStripButton('Scan')
-$btnAbortScan = New-Object System.Windows.Forms.ToolStripButton('Abort Scan')
 $btnClean = New-Object System.Windows.Forms.ToolStripButton('Clean Selected')
 $btnSelectAll = New-Object System.Windows.Forms.ToolStripButton('Select All')
 $btnSelectNone = New-Object System.Windows.Forms.ToolStripButton('Select None')
@@ -1568,7 +1567,15 @@ $toolStatus.Text = 'Select categories and click Scan.'
 
 $btnAbortScan.Add_Click({
     $script:scanCancelRequested = $true
+    $script:scanRunning = $false
     $btnAbortScan.Enabled = $false
+    $btnAbortScan.Visible = $false
+    $toolProgress.Style = 'Marquee'
+    $toolProgress.Visible = $false
+    $toolProgress.Value = 0
+    $toolStatus.Text = 'Scan aborted.'
+    $btnScan.Enabled = $true
+    Update-Counts
 })
 
 function Update-Counts {
