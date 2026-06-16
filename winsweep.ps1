@@ -1344,7 +1344,6 @@ $toolStrip.GripStyle = 'Hidden'
 $toolStrip.Dock = 'Top'
 
 $btnScan = New-Object System.Windows.Forms.ToolStripButton('Scan')
-$btnScanOptions = New-Object System.Windows.Forms.ToolStripButton('Scan Options')
 $btnClean = New-Object System.Windows.Forms.ToolStripButton('Clean Selected')
 $btnSelectAll = New-Object System.Windows.Forms.ToolStripButton('Select All')
 $btnSelectNone = New-Object System.Windows.Forms.ToolStripButton('Select None')
@@ -1359,7 +1358,6 @@ $toolProgress.Width = 140
 $toolStatus = New-Object System.Windows.Forms.ToolStripLabel('Ready')
 
 [void]$toolStrip.Items.Add($btnScan)
-[void]$toolStrip.Items.Add($btnScanOptions)
 [void]$toolStrip.Items.Add($btnClean)
 [void]$toolStrip.Items.Add($btnSelectAll)
 [void]$toolStrip.Items.Add($btnSelectNone)
@@ -1388,7 +1386,6 @@ $split = New-Object System.Windows.Forms.SplitContainer
 $split.Dock = 'Fill'
 $split.SplitterDistance = 260
 $split.Panel1MinSize = 220
-$split.Panel2Collapsed = $true
 
 $groupOrder = @('Recommended', 'System', 'Applications', 'Registry')
 $groupDefaults = @{
@@ -1404,6 +1401,28 @@ $tabControl.Alignment = 'Top'
 $tabControl.SizeMode = 'Normal'
 
 $script:categoryLists = @{}
+
+$catPanel = New-Object System.Windows.Forms.Panel
+$catPanel.Dock = 'Fill'
+
+$catButtonPanel = New-Object System.Windows.Forms.Panel
+$catButtonPanel.Dock = 'Bottom'
+$catButtonPanel.Height = 32
+
+$btnCatSelectAll = New-Object System.Windows.Forms.Button
+$btnCatSelectAll.Text = 'Select All'
+$btnCatSelectAll.Width = 100
+$btnCatSelectAll.Height = 26
+$btnCatSelectAll.Location = New-Object System.Drawing.Point(5, 3)
+
+$btnCatSelectNone = New-Object System.Windows.Forms.Button
+$btnCatSelectNone.Text = 'Select None'
+$btnCatSelectNone.Width = 100
+$btnCatSelectNone.Height = 26
+$btnCatSelectNone.Location = New-Object System.Drawing.Point(110, 3)
+
+$catButtonPanel.Controls.Add($btnCatSelectAll)
+$catButtonPanel.Controls.Add($btnCatSelectNone)
 
 foreach ($groupName in $groupOrder) {
     $tabPage = New-Object System.Windows.Forms.TabPage
@@ -1428,6 +1447,9 @@ foreach ($groupName in $groupOrder) {
     $tabPage.Controls.Add($clb)
     [void]$tabControl.TabPages.Add($tabPage)
 }
+
+$catPanel.Controls.Add($tabControl)
+$catPanel.Controls.Add($catButtonPanel)
 
 $grid = New-Object System.Windows.Forms.DataGridView
 $grid.Dock = 'Fill'
@@ -1514,7 +1536,7 @@ $grid.Add_CellMouseEnter({
     }
 })
 
-$split.Panel1.Controls.Add($tabControl)
+$split.Panel1.Controls.Add($catPanel)
 $split.Panel2.Controls.Add($grid)
 
 $statusStrip = New-Object System.Windows.Forms.StatusStrip
@@ -1556,6 +1578,24 @@ $grid.Add_CurrentCellDirtyStateChanged({
 })
 $grid.Add_CellValueChanged({ Update-Counts })
 
+$btnCatSelectAll.Add_Click({
+    foreach ($groupName in $groupOrder) {
+        $clb = $script:categoryLists[$groupName]
+        for ($i = 0; $i -lt $clb.Items.Count; $i++) {
+            $clb.SetItemChecked($i, $true)
+        }
+    }
+})
+
+$btnCatSelectNone.Add_Click({
+    foreach ($groupName in $groupOrder) {
+        $clb = $script:categoryLists[$groupName]
+        for ($i = 0; $i -lt $clb.Items.Count; $i++) {
+            $clb.SetItemChecked($i, $false)
+        }
+    }
+})
+
 $btnSelectAll.Add_Click({
     foreach ($row in $grid.Rows) { $row.Cells['Selected'].Value = $true }
     Update-Counts
@@ -1569,13 +1609,6 @@ $btnSelectNone.Add_Click({
 $btnOpenBackup.Add_Click({
     Start-Process explorer.exe $PSScriptRoot
 })
-
-$btnScanOptions.Add_Click({
-    $split.Panel1Collapsed = $false
-    if ($grid.Rows.Count -gt 0) {
-        $split.Panel2Collapsed = $false
-    }
-    $toolStatus.Text = 'Scan options visible. Adjust categories and click Scan.'
 })
 
 $btnUndo.Add_Click({
@@ -1664,8 +1697,6 @@ $btnScan.Add_Click({
         }
 
         if ($grid.Rows.Count -gt 0) {
-            $split.Panel2Collapsed = $false
-            $split.Panel1Collapsed = $true
             $btnClean.Visible = $true
             $btnSelectAll.Visible = $true
             $btnSelectNone.Visible = $true
@@ -1673,8 +1704,6 @@ $btnScan.Add_Click({
             $btnSelectAll.Enabled = $true
             $btnSelectNone.Enabled = $true
         } else {
-            $split.Panel1Collapsed = $false
-            $split.Panel2Collapsed = $true
             $btnClean.Visible = $false
             $btnSelectAll.Visible = $false
             $btnSelectNone.Visible = $false
@@ -1754,7 +1783,7 @@ $btnClean.Add_Click({
     if ($chkRestore.Checked) {
         $toolStatus.Text = 'Creating restore point...'
         try {
-            Checkpoint-Computer -Description 'win-clean backup' -RestorePointType 'MODIFY_SETTINGS' | Out-Null
+            Checkpoint-Computer -Description 'winsweep backup' -RestorePointType 'MODIFY_SETTINGS' | Out-Null
         } catch {
             $cont = [System.Windows.Forms.MessageBox]::Show(
                 "Could not create restore point: $($_.Exception.Message)`r`nContinue cleanup anyway?",
@@ -1846,7 +1875,7 @@ $btnClean.Add_Click({
     $progressForm.Show()
 
     $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
-    $logPath = Join-Path $PSScriptRoot "win-clean_${stamp}.log"
+    $logPath = Join-Path $PSScriptRoot "winsweep_${stamp}.log"
     $logLines = [System.Collections.Generic.List[string]]::new()
 
     $manifest = @{

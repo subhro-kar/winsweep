@@ -28,7 +28,7 @@ jobs:
       - name: Parse-check script
         shell: pwsh
         run: |
-          $null = [System.Management.Automation.PSParser]::Tokenize((Get-Content -LiteralPath 'win-clean-gui.ps1' -Raw), [ref]$null)
+          $null = [System.Management.Automation.PSParser]::Tokenize((Get-Content -LiteralPath 'winsweep.ps1' -Raw), [ref]$null)
           Write-Host "Parse check passed"
 
       - name: Commit updated changelog
@@ -49,4 +49,4 @@ jobs:
           draft: false
           prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') }}
           files: |
-            win-clean-gui.ps1
+            winsweep.ps1
