@@ -1344,6 +1344,7 @@ $toolStrip.GripStyle = 'Hidden'
 $toolStrip.Dock = 'Top'
 
 $btnScan = New-Object System.Windows.Forms.ToolStripButton('Scan')
+$btnAbortScan = New-Object System.Windows.Forms.ToolStripButton('Abort Scan')
 $btnClean = New-Object System.Windows.Forms.ToolStripButton('Clean Selected')
 $btnSelectAll = New-Object System.Windows.Forms.ToolStripButton('Select All')
 $btnSelectNone = New-Object System.Windows.Forms.ToolStripButton('Select None')
@@ -1358,6 +1359,7 @@ $toolProgress.Width = 140
 $toolStatus = New-Object System.Windows.Forms.ToolStripLabel('Ready')
 
 [void]$toolStrip.Items.Add($btnScan)
+[void]$toolStrip.Items.Add($btnAbortScan)
 [void]$toolStrip.Items.Add($btnClean)
 [void]$toolStrip.Items.Add($btnSelectAll)
 [void]$toolStrip.Items.Add($btnSelectNone)
@@ -1558,10 +1560,16 @@ $resultsStore = [System.Collections.Generic.List[object]]::new()
 $btnClean.Visible = $false
 $btnSelectAll.Visible = $false
 $btnSelectNone.Visible = $false
+$btnAbortScan.Visible = $false
 $btnClean.Enabled = $false
 $btnSelectAll.Enabled = $false
 $btnSelectNone.Enabled = $false
 $toolStatus.Text = 'Select categories and click Scan.'
+
+$btnAbortScan.Add_Click({
+    $script:scanCancelRequested = $true
+    $btnAbortScan.Enabled = $false
+})
 
 function Update-Counts {
     $selected = 0
@@ -1619,7 +1627,12 @@ $script:scanRunning = $false
 
 $form.Add_FormClosing({
     if ($script:scanRunning) {
-        $script:scanCancelRequested = $true
+        [System.Windows.Forms.MessageBox]::Show(
+            'A scan is in progress. Click "Abort Scan" to stop it first.',
+            'Scan Running',
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Warning
+        ) | Out-Null
         $_.Cancel = $true
     }
 })
@@ -1642,6 +1655,8 @@ $btnScan.Add_Click({
     $btnClean.Enabled = $false
     $btnSelectAll.Enabled = $false
     $btnSelectNone.Enabled = $false
+    $btnAbortScan.Visible = $true
+    $btnAbortScan.Enabled = $true
     $toolProgress.Visible = $true
     $toolProgress.Style = 'Continuous'
     $toolStatus.Text = 'Scanning...'
@@ -1677,12 +1692,18 @@ $btnScan.Add_Click({
                         [void]$resultsStore.Add($item)
                         Add-ResultRow -TargetGrid $grid -Item $item
                         $categoryFound++
+                        if ($categoryFound % 10 -eq 0) {
+                            [System.Windows.Forms.Application]::DoEvents()
+                            if ($script:scanCancelRequested) { break }
+                        }
                     }
                 } elseif ($null -ne $scanOut) {
                     [void]$resultsStore.Add($scanOut)
                     Add-ResultRow -TargetGrid $grid -Item $scanOut
                     $categoryFound = 1
                 }
+
+                if ($script:scanCancelRequested) { break }
 
                 $totalFound += $categoryFound
                 $statInfo.Text = "Category: $($definition.Name) = $categoryFound item(s) | Total found: $totalFound"
@@ -1695,6 +1716,7 @@ $btnScan.Add_Click({
             $toolProgress.Value = [Math]::Min($toolProgress.Maximum, $done)
             Update-Counts
             [System.Windows.Forms.Application]::DoEvents()
+            if ($script:scanCancelRequested) { break }
         }
 
         if ($categoryErrors.Count -gt 0) {
@@ -1736,15 +1758,16 @@ $btnScan.Add_Click({
         ) | Out-Null
     } finally {
         $btnScan.Enabled = $true
+        $btnAbortScan.Visible = $false
         $script:scanRunning = $false
         $toolProgress.Style = 'Marquee'
         $toolProgress.Visible = $false
         $toolProgress.Value = 0
-        Update-Counts
         if ($script:scanCancelRequested) {
-            $script:scanCancelRequested = $false
-            $form.Close()
+            $toolStatus.Text = 'Scan aborted.'
         }
+        $script:scanCancelRequested = $false
+        Update-Counts
     }
 })
 
