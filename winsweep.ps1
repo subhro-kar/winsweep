@@ -1592,6 +1592,10 @@ function Update-Counts {
     }
     $statCounts.Text = "Found: $($grid.Rows.Count) | Selected: $selected"
     $btnClean.Enabled = ($selected -gt 0)
+    $hasRows = ($grid.Rows.Count -gt 0)
+    $btnClean.Visible = $hasRows
+    $btnSelectAll.Visible = $hasRows
+    $btnSelectNone.Visible = $hasRows
 }
 
 $grid.Add_CurrentCellDirtyStateChanged({
