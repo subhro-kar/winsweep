@@ -1685,110 +1685,49 @@ $btnScan.Add_Click({
     $toolProgress.Maximum = [Math]::Max(1, $definitions.Count)
     $toolProgress.Value = 0
 
-    $script:scanResults = [System.Collections.Generic.List[object]]::new()
+    $script:scanStepIndex = 0
+    $script:scanDefinitions = $definitions
     $script:scanErrors = [System.Collections.Generic.List[string]]::new()
-    $script:scanRunspaceProgress = [System.Collections.Concurrent.ConcurrentDictionary[string,object]]::new()
-    $script:scanRunspaceProgress['Done'] = 0
-    $script:scanRunspaceProgress['CurrentCategory'] = ''
-    $script:scanRunspaceProgress['ItemCount'] = 0
-
-    $runspace = [runspacefactory]::Create()
-    $runspace.ApartmentState = 'STA'
-    $runspace.ThreadOptions = 'ReuseThread'
-    $powershell = [powershell]::Create()
-    $powershell.Runspace = $runspace
-
-    $script:scanRunspace = $powershell
-
-    $categoryNames = $definitions | ForEach-Object { $_.Name }
-    $scannerNames = $definitions | ForEach-Object { $_.Scanner }
-
-    [void]$powershell.AddScript({
-        param($cats, $scanners, $progress)
-        $results = [System.Collections.Generic.List[object]]::new()
-        $errors = [System.Collections.Generic.List[string]]::new()
-
-        for ($i = 0; $i -lt $cats.Count; $i++) {
-            $progress['CurrentCategory'] = $cats[$i]
-            $progress['Done'] = $i
-
-            try {
-                $scanFn = Get-Command -Name $scanners[$i] -ErrorAction SilentlyContinue
-                if (-not $scanFn) { continue }
-                $scanOut = & $scanners[$i]
-                $count = 0
-                if ($scanOut -is [System.Collections.IEnumerable]) {
-                    foreach ($item in $scanOut) {
-                        if ($null -ne $item) {
-                            $results.Add($item)
-                            $count++
-                        }
-                    }
-                } elseif ($null -ne $scanOut) {
-                    $results.Add($scanOut)
-                    $count = 1
-                }
-                $progress['ItemCount'] = [int]$progress['ItemCount'] + $count
-            } catch {
-                $errors.Add("$($cats[$i]): $($_.Exception.Message)")
-            }
-        }
-        $progress['Done'] = $cats.Count
-        $progress['CurrentCategory'] = ''
-
-        return @{ Results = $results; Errors = $errors }
-    }).AddArgument($categoryNames).AddArgument($scannerNames).AddArgument($script:scanRunspaceProgress)
-
-    $asyncResult = $powershell.BeginInvoke()
 
     $script:scanTimer = New-Object System.Windows.Forms.Timer
-    $script:scanTimer.Interval = 200
+    $script:scanTimer.Interval = 1
 
     $script:scanTimer.Add_Tick({
-        $currentCat = [string]$script:scanRunspaceProgress['CurrentCategory']
-        $done = [int]$script:scanRunspaceProgress['Done']
-        $itemCount = [int]$script:scanRunspaceProgress['ItemCount']
-
-        $toolProgress.Value = [Math]::Min($toolProgress.Maximum, $done + 1)
-        if ($currentCat) {
-            $toolStatus.Text = "Scanning: $currentCat ($itemCount found)..."
-            $statCounts.Text = "Scanning... | $itemCount item(s) found so far"
+        if ($script:scanCancelRequested) {
+            $script:scanTimer.Stop()
+            $script:scanRunning = $false
+            $script:scanCancelRequested = $false
+            $btnScan.Enabled = $true
+            $btnAbortScan.Visible = $false
+            $btnAbortScan.Enabled = $false
+            $toolProgress.Style = 'Marquee'
+            $toolProgress.Visible = $false
+            $toolProgress.Value = 0
+            $toolStatus.Text = 'Scan aborted.'
+            Update-Counts
+            return
         }
 
-        if ($asyncResult.IsCompleted) {
+        if ($script:scanStepIndex -ge $script:scanDefinitions.Count) {
             $script:scanTimer.Stop()
-            try {
-                $output = $powershell.EndInvoke($asyncResult)
-                if ($output -and $output.Results) {
-                    foreach ($item in $output.Results) {
-                        [void]$resultsStore.Add($item)
-                        Add-ResultRow -TargetGrid $grid -Item $item
-                    }
-                }
-                if ($output -and $output.Errors -and $output.Errors.Count -gt 0) {
-                    $toolStatus.Text = "Scan completed with warnings. Found $($grid.Rows.Count) item(s)."
-                    [System.Windows.Forms.MessageBox]::Show(
-                        "Some categories failed:`r`n" + ($output.Errors -join "`r`n"),
-                        'Scan Warnings',
-                        [System.Windows.Forms.MessageBoxButtons]::OK,
-                        [System.Windows.Forms.MessageBoxIcon]::Warning
-                    ) | Out-Null
-                } else {
-                    $toolStatus.Text = "Scan complete. Found $($grid.Rows.Count) item(s)."
-                }
-            } catch {
-                $toolStatus.Text = "Scan failed: $($_.Exception.Message)"
-            } finally {
-                $powershell.Dispose()
-                $runspace.Dispose()
-            }
-
             $script:scanRunning = $false
             $btnScan.Enabled = $true
             $btnAbortScan.Visible = $false
             $toolProgress.Style = 'Marquee'
             $toolProgress.Visible = $false
             $toolProgress.Value = 0
+
+            if ($script:scanErrors.Count -gt 0) {
+                $toolStatus.Text = "Scan completed with warnings. Found $($grid.Rows.Count) item(s)."
+                [System.Windows.Forms.MessageBox]::Show(
+                    "Some categories failed:`r`n" + ($script:scanErrors -join "`r`n"),
+                    'Scan Warnings',
+                    [System.Windows.Forms.MessageBoxButtons]::OK,
+                    [System.Windows.Forms.MessageBoxIcon]::Warning
+                ) | Out-Null
+            } else {
+                $toolStatus.Text = "Scan complete. Found $($grid.Rows.Count) item(s)."
+            }
 
             if ($grid.Rows.Count -gt 0) {
                 $btnClean.Visible = $true
@@ -1808,28 +1747,38 @@ $btnScan.Add_Click({
                 $btnScan.Text = 'Scan'
             }
             Update-Counts
-        } elseif ($script:scanCancelRequested) {
-            $script:scanTimer.Stop()
-            try {
-                $powershell.Stop()
-                $powershell.EndInvoke($asyncResult) | Out-Null
-            } catch { }
-            finally {
-                $powershell.Dispose()
-                $runspace.Dispose()
-            }
-
-            $script:scanRunning = $false
-            $script:scanCancelRequested = $false
-            $btnScan.Enabled = $true
-            $btnAbortScan.Visible = $false
-            $btnAbortScan.Enabled = $false
-            $toolProgress.Style = 'Marquee'
-            $toolProgress.Visible = $false
-            $toolProgress.Value = 0
-            $toolStatus.Text = 'Scan aborted.'
-            Update-Counts
+            return
         }
+
+        $def = $script:scanDefinitions[$script:scanStepIndex]
+        $script:scanStepIndex++
+
+        $toolProgress.Value = $script:scanStepIndex
+        $toolStatus.Text = "Scanning: $($def.Name)..."
+        $statCounts.Text = "Scanning: $($def.Name)... | $($grid.Rows.Count) item(s) found so far"
+        [System.Windows.Forms.Application]::DoEvents()
+
+        try {
+            $scanOut = & $def.Scanner
+            $count = 0
+            if ($scanOut -is [System.Collections.IEnumerable]) {
+                foreach ($item in $scanOut) {
+                    if ($null -ne $item) {
+                        [void]$resultsStore.Add($item)
+                        Add-ResultRow -TargetGrid $grid -Item $item
+                        $count++
+                    }
+                }
+            } elseif ($null -ne $scanOut) {
+                [void]$resultsStore.Add($scanOut)
+                Add-ResultRow -TargetGrid $grid -Item $scanOut
+                $count = 1
+            }
+        } catch {
+            $script:scanErrors.Add("$($def.Name): $($_.Exception.Message)")
+        }
+
+        $statCounts.Text = "Scanning... | $($grid.Rows.Count) item(s) found so far"
     })
 
     $script:scanTimer.Start()
