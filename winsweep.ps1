@@ -1355,10 +1355,16 @@ $toolProgress.Style = 'Marquee'
 $toolProgress.Visible = $false
 $toolProgress.Width = 140
 
+$btnAbortScan = New-Object System.Windows.Forms.ToolStripButton('X')
+$btnAbortScan.ForeColor = [System.Drawing.Color]::Red
+$btnAbortScan.Font = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
+$btnAbortScan.ToolTipText = 'Abort Scan'
+$btnAbortScan.Visible = $false
+$btnAbortScan.Padding = New-Object System.Windows.Forms.Padding(2)
+
 $toolStatus = New-Object System.Windows.Forms.ToolStripLabel('Ready')
 
 [void]$toolStrip.Items.Add($btnScan)
-[void]$toolStrip.Items.Add($btnAbortScan)
 [void]$toolStrip.Items.Add($btnClean)
 [void]$toolStrip.Items.Add($btnSelectAll)
 [void]$toolStrip.Items.Add($btnSelectNone)
@@ -1366,6 +1372,7 @@ $toolStatus = New-Object System.Windows.Forms.ToolStripLabel('Ready')
 [void]$toolStrip.Items.Add($btnUndo)
 [void]$toolStrip.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
 [void]$toolStrip.Items.Add($toolProgress)
+[void]$toolStrip.Items.Add($btnAbortScan)
 [void]$toolStrip.Items.Add($toolStatus)
 
 $banner = New-Object System.Windows.Forms.Label
