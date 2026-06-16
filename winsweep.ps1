@@ -1569,6 +1569,7 @@ function Update-Counts {
         if ($row.Cells['Selected'].Value -eq $true) { $selected++ }
     }
     $statCounts.Text = "Found: $($grid.Rows.Count) | Selected: $selected"
+    $btnClean.Enabled = ($selected -gt 0)
 }
 
 $grid.Add_CurrentCellDirtyStateChanged({
@@ -1614,6 +1615,15 @@ $btnUndo.Add_Click({
     Show-UndoDialog -BackupDir $PSScriptRoot
 })
 
+$script:scanRunning = $false
+
+$form.Add_FormClosing({
+    if ($script:scanRunning) {
+        $script:scanCancelRequested = $true
+        $_.Cancel = $true
+    }
+})
+
 $btnScan.Add_Click({
     $selectedCategories = @()
     foreach ($groupName in $groupOrder) {
@@ -1635,6 +1645,8 @@ $btnScan.Add_Click({
     $toolProgress.Visible = $true
     $toolProgress.Style = 'Continuous'
     $toolStatus.Text = 'Scanning...'
+    $script:scanRunning = $true
+    $script:scanCancelRequested = $false
 
     try {
         $grid.Rows.Clear()
@@ -1652,6 +1664,8 @@ $btnScan.Add_Click({
         foreach ($definition in $definitions) {
             $toolStatus.Text = "Scanning category $($done + 1) of $($definitions.Count): $($definition.Name)..."
             [System.Windows.Forms.Application]::DoEvents()
+
+            if ($script:scanCancelRequested) { break }
 
             try {
                 $scanOut = & $definition.Scanner
@@ -1722,9 +1736,15 @@ $btnScan.Add_Click({
         ) | Out-Null
     } finally {
         $btnScan.Enabled = $true
+        $script:scanRunning = $false
         $toolProgress.Style = 'Marquee'
         $toolProgress.Visible = $false
+        $toolProgress.Value = 0
         Update-Counts
+        if ($script:scanCancelRequested) {
+            $script:scanCancelRequested = $false
+            $form.Close()
+        }
     }
 })
 
@@ -1874,6 +1894,7 @@ $btnClean.Add_Click({
     })
 
     $progressForm.Show()
+    [System.Windows.Forms.Application]::DoEvents()
 
     $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
     $logPath = Join-Path $PSScriptRoot "winsweep_${stamp}.log"
