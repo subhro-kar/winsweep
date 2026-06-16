@@ -1702,6 +1702,7 @@ $btnScan.Add_Click({
             $btnClean.Enabled = $true
             $btnSelectAll.Enabled = $true
             $btnSelectNone.Enabled = $true
+            $btnScan.Text = 'Rescan'
         } else {
             $btnClean.Visible = $false
             $btnSelectAll.Visible = $false
@@ -1709,6 +1710,7 @@ $btnScan.Add_Click({
             $btnClean.Enabled = $false
             $btnSelectAll.Enabled = $false
             $btnSelectNone.Enabled = $false
+            $btnScan.Text = 'Scan'
         }
     } catch {
         $toolStatus.Text = "Scan failed: $($_.Exception.Message)"
