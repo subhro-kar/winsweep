@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 
 param(
     [switch]$RequireAdmin,
@@ -231,6 +231,8 @@ function Format-Bytes {
     return "{0:N2} GB" -f ($Bytes / 1GB)
 }
 
+$script:scanResultIdCounter = 0
+
 function New-ScanResult {
     param(
         [string]$Category,
@@ -242,7 +244,9 @@ function New-ScanResult {
         [hashtable]$DeleteMeta
     )
 
+    $script:scanResultIdCounter++
     [PSCustomObject]@{
+        Id = $script:scanResultIdCounter
         Selected = $false
         Category = $Category
         SubCategory = $SubCategory
@@ -271,14 +275,17 @@ function Get-FolderBytes {
 }
 
 function Move-PathToRecycleBin {
-    param([string]$Path)
+    param(
+        [string]$Path,
+        [object]$ShellComObject = $null
+    )
 
     if (-not (Test-Path -LiteralPath $Path)) { return $true }
     $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
     if (-not $item) { return $true }
 
     try {
-        $shell = New-Object -ComObject Shell.Application -ErrorAction Stop
+        $shell = if ($ShellComObject) { $ShellComObject } else { New-Object -ComObject Shell.Application -ErrorAction Stop }
         $parent = Split-Path -Path $item.FullName -Parent
         $name = Split-Path -Path $item.FullName -Leaf
         $folder = $shell.NameSpace($parent)
@@ -290,9 +297,7 @@ function Move-PathToRecycleBin {
         $recycle = $shell.NameSpace(10)
         if (-not $recycle) { return $false }
 
-        # SHFileOperation flags: ALLOWUNDO + SILENT + NOCONFIRMATION + NOERRORUI
         $recycle.MoveHere($target, 0x0454)
-        [System.Windows.Forms.Application]::DoEvents()
         Start-Sleep -Milliseconds 50
         return (-not (Test-Path -LiteralPath $item.FullName))
     } catch {
@@ -301,7 +306,10 @@ function Move-PathToRecycleBin {
 }
 
 function Get-LockCandidateProcesses {
-    param([string]$Path)
+    param(
+        [string]$Path,
+        [object[]]$CachedProcesses = $null
+    )
 
     if ([string]::IsNullOrWhiteSpace($Path)) { return @() }
 
@@ -309,7 +317,9 @@ function Get-LockCandidateProcesses {
     $norm = $full.ToLowerInvariant()
     $candidates = [System.Collections.Generic.List[object]]::new()
 
-    foreach ($p in (Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)) {
+    $processes = if ($CachedProcesses) { $CachedProcesses } else { @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue) }
+
+    foreach ($p in $processes) {
         $exe = [string]$p.ExecutablePath
         $cmd = [string]$p.CommandLine
 
@@ -397,7 +407,9 @@ function Remove-PathWithRecovery {
         [string]$Path,
         [bool]$AllowHardDeleteFallback = $true,
         [int]$LockResolutionAttempts = 0,
-        [scriptblock]$LogCallback = $null
+        [scriptblock]$LogCallback = $null,
+        [object]$ShellComObject = $null,
+        [object[]]$CachedProcesses = $null
     )
 
     if (-not (Test-Path -LiteralPath $Path)) {
@@ -414,15 +426,8 @@ function Remove-PathWithRecovery {
         return @{ Success = $false; Mode = 'AccessFailed' }
     }
 
-    $sizeBytes = 0L
-    if ($item.PSIsContainer) {
-        $sizeBytes = Get-FolderBytes -Paths @($item.FullName)
-    } else {
-        $sizeBytes = [Int64]$item.Length
-    }
-
-    if ($sizeBytes -gt 2GB -and $AllowHardDeleteFallback) {
-        $msg = "Item appears large ($((Format-Bytes -Bytes $sizeBytes))). Recycle Bin move may fail. Continue with permanent delete?`n`n$Path"
+    if (-not $item.PSIsContainer -and $item.Length -gt 2GB -and $AllowHardDeleteFallback) {
+        $msg = "File appears large ($((Format-Bytes -Bytes $item.Length))). Recycle Bin move may fail. Continue with permanent delete?`n`n$Path"
         $answer = [System.Windows.Forms.MessageBox]::Show($msg, 'Large Item', [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Warning)
         if ($answer -eq [System.Windows.Forms.DialogResult]::Yes) {
             try {
@@ -434,10 +439,27 @@ function Remove-PathWithRecovery {
         }
     }
 
-    $moved = Move-PathToRecycleBin -Path $Path
+    $moved = Move-PathToRecycleBin -Path $Path -ShellComObject $ShellComObject
     if ($moved) {
         if ($LogCallback) { & $LogCallback "REMOVED $Path (recycle bin)" }
         return @{ Success = $true; Mode = 'RecycleBin' }
+    }
+
+    if ($item.PSIsContainer -and $AllowHardDeleteFallback) {
+        $sizeBytes = Get-FolderBytes -Paths @($item.FullName)
+        if ($sizeBytes -gt 2GB) {
+            $msg = "Folder appears large ($((Format-Bytes -Bytes $sizeBytes))). Continue with permanent delete?`n`n$Path"
+            $answer = [System.Windows.Forms.MessageBox]::Show($msg, 'Large Item', [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Warning)
+            if ($answer -eq [System.Windows.Forms.DialogResult]::Yes) {
+                try {
+                    Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+                    if ($LogCallback) { & $LogCallback "REMOVED $Path (hard delete)" }
+                    return @{ Success = $true; Mode = 'HardDelete' }
+                } catch {
+                    return @{ Success = $false; Mode = 'HardDeleteFailed'; Error = $_.Exception.Message }
+                }
+            }
+        }
     }
 
     $fallbackError = $null
@@ -454,7 +476,7 @@ function Remove-PathWithRecovery {
     }
 
     if ($LockResolutionAttempts -lt 1) {
-        $candidates = Get-LockCandidateProcesses -Path $Path
+        $candidates = Get-LockCandidateProcesses -Path $Path -CachedProcesses $CachedProcesses
         if ($candidates.Count -gt 0) {
             if ($LogCallback) { & $LogCallback "SKIPPED $Path (in use by $($candidates[0].Name))" }
             return @{ Success = $false; Mode = 'SkippedByUser'; LockCandidates = $candidates }
@@ -616,12 +638,12 @@ function Find-OrphanStartupEntries {
         [System.Environment]::GetFolderPath('CommonStartup')
     )
 
+    $shell = New-Object -ComObject WScript.Shell
     foreach ($folder in $startupFolders) {
         if (-not (Test-PathExists $folder)) { continue }
         $shortcuts = Get-ChildItem -LiteralPath $folder -Filter '*.lnk' -ErrorAction SilentlyContinue
         foreach ($lnk in $shortcuts) {
             try {
-                $shell = New-Object -ComObject WScript.Shell
                 $target = $shell.CreateShortcut($lnk.FullName).TargetPath
                 if (-not [string]::IsNullOrWhiteSpace($target) -and -not (Test-PathExists $target)) {
                     $results.Add((New-ScanResult -Category 'Application' -SubCategory 'Startup Entries' -Name $lnk.Name `
@@ -703,6 +725,19 @@ function Find-OrphanFilesystemFolders {
         }
     }
 
+    $nameParts = @()
+    foreach ($name in $installedNames) {
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        $nameParts += [regex]::Escape($name)
+    }
+    $installedNamesRegex = if ($nameParts.Count -gt 0) {
+        [regex]::New(($nameParts -join '|'), [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    } else { $null }
+
+    $cachedProcesses = @(Get-Process -ErrorAction SilentlyContinue | ForEach-Object {
+        try { $_.MainModule.FileName.ToLowerInvariant() } catch { '' }
+    } | Where-Object { $_ })
+
     $scanRoots = @(
         [System.Environment]::GetFolderPath('ProgramFiles'),
         ${env:ProgramFiles(x86)},
@@ -717,25 +752,28 @@ function Find-OrphanFilesystemFolders {
         'temp', 'cache', 'Cache', 'Low', 'VMware', 'Hyper-V', 'docker'
     )
 
+    $cutoffDate = (Get-Date).AddDays(-180)
+
     foreach ($root in $scanRoots) {
         foreach ($dir in (Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue)) {
             if ($ignoredFolders -contains $dir.Name) { continue }
             if ($installedLocations.Contains($dir.FullName)) { continue }
             if ($installedLocations.Contains($dir.FullName.TrimEnd('\\'))) { continue }
 
-            $matchedApp = $installedNames | Where-Object {
-                $_ -and ($dir.Name -match [regex]::Escape($_) -or $_ -match [regex]::Escape($dir.Name))
-            } | Select-Object -First 1
-            if ($matchedApp) { continue }
-
+            $dirNameNorm = $dir.Name.ToLowerInvariant()
+            if ($installedNamesRegex -and $installedNamesRegex.IsMatch($dirNameNorm)) { continue }
             $folderNorm = $dir.FullName.ToLowerInvariant()
-            $processInFolder = Get-Process -ErrorAction SilentlyContinue | Where-Object {
-                try { $_.MainModule.FileName.ToLowerInvariant().StartsWith($folderNorm) } catch { $false }
-            } | Select-Object -First 1
+            $processInFolder = $false
+            foreach ($procPath in $cachedProcesses) {
+                if ($procPath.StartsWith($folderNorm) -or $folderNorm.StartsWith($procPath.TrimEnd('\\'))) {
+                    $processInFolder = $true
+                    break
+                }
+            }
             if ($processInFolder) { continue }
 
-            $fileAny = Get-ChildItem -LiteralPath $dir.FullName -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
-            if (-not $fileAny) {
+            $allFiles = @(Get-ChildItem -LiteralPath $dir.FullName -Recurse -File -ErrorAction SilentlyContinue)
+            if ($allFiles.Count -eq 0) {
                 $results.Add((New-ScanResult -Category 'Application' -SubCategory 'Orphaned Folders' -Name $dir.Name `
                     -PathOrKey $dir.FullName -Reason 'Empty folder not claimed by installed application' -DeleteMeta @{
                         Type = 'FilesystemPath'
@@ -744,9 +782,8 @@ function Find-OrphanFilesystemFolders {
                 continue
             }
 
-            $newestFile = Get-ChildItem -LiteralPath $dir.FullName -Recurse -File -ErrorAction SilentlyContinue |
-                Sort-Object LastWriteTime -Descending | Select-Object -First 1
-            if ($newestFile -and $newestFile.LastWriteTime -lt (Get-Date).AddDays(-180)) {
+            $newestFile = ($allFiles | Sort-Object LastWriteTime -Descending | Select-Object -First 1)
+            if ($newestFile -and $newestFile.LastWriteTime -lt $cutoffDate) {
                 $results.Add((New-ScanResult -Category 'Application' -SubCategory 'Orphaned Folders' -Name $dir.Name `
                     -PathOrKey $dir.FullName -Reason "Stale folder (>180 days old activity)" -DeleteMeta @{
                         Type = 'FilesystemPath'
@@ -1090,8 +1127,8 @@ function Get-DefenderHistoryItem {
 }
 
 function Get-OldWUBackupsItem {
-    $paths = @('C:\Windows\SoftwareDistribution\Download')
-    return (New-DeepCleanAggregateItem -Name 'Old WU Backups' -Reason 'Old Windows Update download cache' -Paths $paths -SubCategory 'Old WU Backups')
+    $paths = @('C:\Windows\SoftwareDistribution\DataStore')
+    return (New-DeepCleanAggregateItem -Name 'Old WU Backups' -Reason 'Old Windows Update datastore and backup files' -Paths $paths -SubCategory 'Old WU Backups')
 }
 
 function Get-ThumbnailCacheItem {
@@ -1474,6 +1511,12 @@ function Initialize-GridColumns {
 
     $TargetGrid.Columns.Clear()
 
+    $colId = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
+    $colId.Name = 'ResultId'
+    $colId.HeaderText = 'ResultId'
+    $colId.ReadOnly = $true
+    $colId.Visible = $false
+
     $colSel = New-Object System.Windows.Forms.DataGridViewCheckBoxColumn
     $colSel.Name = 'Selected'
     $colSel.HeaderText = 'Selected'
@@ -1505,6 +1548,7 @@ function Initialize-GridColumns {
     $colSize.HeaderText = 'Size'
     $colSize.ReadOnly = $true
 
+    [void]$TargetGrid.Columns.Add($colId)
     [void]$TargetGrid.Columns.Add($colSel)
     [void]$TargetGrid.Columns.Add($colCategory)
     [void]$TargetGrid.Columns.Add($colName)
@@ -1519,11 +1563,11 @@ function Add-ResultRow {
         [object]$Item
     )
 
-    if ($TargetGrid.Columns.Count -lt 6) {
+    if ($TargetGrid.Columns.Count -lt 7) {
         Initialize-GridColumns -TargetGrid $TargetGrid
     }
 
-    $idx = $TargetGrid.Rows.Add($false, $Item.Category, $Item.Name, $Item.PathOrKey, $Item.Reason, $Item.Size)
+    $idx = $TargetGrid.Rows.Add($Item.Id, $Item.Selected, $Item.Category, $Item.Name, $Item.PathOrKey, $Item.Reason, $Item.Size)
     if ($Item.Category -eq 'Registry') {
         $TargetGrid.Rows[$idx].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(255, 235, 235)
     } elseif ($Item.Category -eq 'Application') {
@@ -1531,6 +1575,20 @@ function Add-ResultRow {
     } elseif ($Item.Category -eq 'Deep Clean') {
         $TargetGrid.Rows[$idx].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(232, 245, 233)
     }
+}
+
+function Add-ResultRows {
+    param(
+        [System.Windows.Forms.DataGridView]$TargetGrid,
+        [System.Collections.Generic.List[object]]$Items
+    )
+
+    if ($Items.Count -eq 0) { return }
+    $TargetGrid.SuspendLayout()
+    foreach ($item in $Items) {
+        Add-ResultRow -TargetGrid $TargetGrid -Item $item
+    }
+    $TargetGrid.ResumeLayout()
 }
 
 Initialize-GridColumns -TargetGrid $grid
@@ -1574,15 +1632,8 @@ $toolStatus.Text = 'Select categories and click Scan.'
 
 $btnAbortScan.Add_Click({
     $script:scanCancelRequested = $true
-    $script:scanRunning = $false
     $btnAbortScan.Enabled = $false
     $btnAbortScan.Visible = $false
-    $toolProgress.Style = 'Marquee'
-    $toolProgress.Visible = $false
-    $toolProgress.Value = 0
-    $toolStatus.Text = 'Scan aborted.'
-    $btnScan.Enabled = $true
-    Update-Counts
 })
 
 function Update-Counts {
@@ -1642,6 +1693,7 @@ $btnUndo.Add_Click({
 })
 
 $script:scanRunning = $false
+$script:scanTimer = $null
 
 $form.Add_FormClosing({
     if ($script:scanRunning) {
@@ -1652,6 +1704,12 @@ $form.Add_FormClosing({
             [System.Windows.Forms.MessageBoxIcon]::Warning
         ) | Out-Null
         $_.Cancel = $true
+        return
+    }
+    if ($script:scanTimer) {
+        $script:scanTimer.Stop()
+        $script:scanTimer.Dispose()
+        $script:scanTimer = $null
     }
 })
 
@@ -1667,6 +1725,12 @@ $btnScan.Add_Click({
     if ($selectedCategories.Count -eq 0) {
         [System.Windows.Forms.MessageBox]::Show('Choose at least one category to scan.', 'Scan', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
         return
+    }
+
+    if ($script:scanTimer) {
+        $script:scanTimer.Stop()
+        $script:scanTimer.Dispose()
+        $script:scanTimer = $null
     }
 
     $btnScan.Enabled = $false
@@ -1699,6 +1763,8 @@ $btnScan.Add_Click({
     $script:scanTimer.Add_Tick({
         if ($script:scanCancelRequested) {
             $script:scanTimer.Stop()
+            $script:scanTimer.Dispose()
+            $script:scanTimer = $null
             $script:scanRunning = $false
             $script:scanCancelRequested = $false
             $btnScan.Enabled = $true
@@ -1714,12 +1780,11 @@ $btnScan.Add_Click({
 
         if ($script:scanStepIndex -ge $script:scanDefinitions.Count) {
             $script:scanTimer.Stop()
+            $script:scanTimer.Dispose()
+            $script:scanTimer = $null
             $script:scanRunning = $false
             $btnScan.Enabled = $true
             $btnAbortScan.Visible = $false
-            $toolProgress.Style = 'Marquee'
-            $toolProgress.Visible = $false
-            $toolProgress.Value = 0
 
             if ($script:scanErrors.Count -gt 0) {
                 $toolStatus.Text = "Scan completed with warnings. Found $($grid.Rows.Count) item(s)."
@@ -1732,6 +1797,10 @@ $btnScan.Add_Click({
             } else {
                 $toolStatus.Text = "Scan complete. Found $($grid.Rows.Count) item(s)."
             }
+
+            $toolProgress.Style = 'Marquee'
+            $toolProgress.Visible = $false
+            $toolProgress.Value = 0
 
             if ($grid.Rows.Count -gt 0) {
                 $btnClean.Visible = $true
@@ -1760,23 +1829,24 @@ $btnScan.Add_Click({
         $toolProgress.Value = $script:scanStepIndex
         $toolStatus.Text = "Scanning: $($def.Name)..."
         $statCounts.Text = "Scanning: $($def.Name)... | $($grid.Rows.Count) item(s) found so far"
-        [System.Windows.Forms.Application]::DoEvents()
 
         try {
             $scanOut = & $def.Scanner
-            $count = 0
+            $batch = [System.Collections.Generic.List[object]]::new()
             if ($scanOut -is [System.Collections.IEnumerable]) {
                 foreach ($item in $scanOut) {
-                    if ($null -ne $item) {
-                        [void]$resultsStore.Add($item)
-                        Add-ResultRow -TargetGrid $grid -Item $item
-                        $count++
-                    }
+                    if ($null -ne $item) { $batch.Add($item) }
                 }
             } elseif ($null -ne $scanOut) {
-                [void]$resultsStore.Add($scanOut)
-                Add-ResultRow -TargetGrid $grid -Item $scanOut
-                $count = 1
+                $batch.Add($scanOut)
+            }
+            if ($batch.Count -gt 0) {
+                $grid.SuspendLayout()
+                foreach ($item in $batch) {
+                    [void]$resultsStore.Add($item)
+                    Add-ResultRow -TargetGrid $grid -Item $item
+                }
+                $grid.ResumeLayout()
             }
         } catch {
             $script:scanErrors.Add("$($def.Name): $($_.Exception.Message)")
@@ -1789,17 +1859,19 @@ $btnScan.Add_Click({
 })
 
 $btnClean.Add_Click({
-    $selectedRows = @()
-    for ($i = 0; $i -lt $grid.Rows.Count; $i++) {
-        if ($grid.Rows[$i].Cells['Selected'].Value -eq $true) {
-            $selectedRows += $i
+    $selectedIds = [System.Collections.Generic.List[int]]::new()
+    foreach ($row in $grid.Rows) {
+        if ($row.Cells['Selected'].Value -eq $true) {
+            $selectedIds.Add([int]$row.Cells['ResultId'].Value)
         }
     }
 
-    if ($selectedRows.Count -eq 0) {
+    if ($selectedIds.Count -eq 0) {
         [System.Windows.Forms.MessageBox]::Show('Select at least one item first.', 'Clean Selected', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
         return
     }
+
+    $selectedItems = @($resultsStore | Where-Object { $selectedIds.Contains($_.Id) -and $_.DeleteMeta })
 
     $confirmForm = New-Object System.Windows.Forms.Form
     $confirmForm.Text = 'Confirm Cleanup'
@@ -1811,7 +1883,7 @@ $btnClean.Add_Click({
     $lbl.Width = 480
     $lbl.Height = 80
     $lbl.Location = New-Object System.Drawing.Point(12, 12)
-    $lbl.Text = "You selected $($selectedRows.Count) item(s).`r`nRegistry entries will be backed up. Files/folders are moved to Recycle Bin when possible. Continue?"
+    $lbl.Text = "You selected $($selectedItems.Count) item(s).`r`nRegistry entries will be backed up. Files/folders are moved to Recycle Bin when possible. Continue?"
 
     $chkRestore = New-Object System.Windows.Forms.CheckBox
     $chkRestore.Text = 'Create System Restore Point first'
@@ -1888,7 +1960,7 @@ $btnClean.Add_Click({
     $progressBar.Width = $progressForm.ClientSize.Width - 16
     $progressBar.Height = 18
     $progressBar.Minimum = 0
-    $progressBar.Maximum = [Math]::Max(1, $selectedRows.Count)
+    $progressBar.Maximum = [Math]::Max(1, $selectedItems.Count)
     $progressBar.Value = 0
     $progressBar.Style = 'Continuous'
 
@@ -1934,7 +2006,10 @@ $btnClean.Add_Click({
     })
 
     $progressForm.Show()
-    [System.Windows.Forms.Application]::DoEvents()
+    $progressForm.Refresh()
+
+    $shellCom = New-Object -ComObject Shell.Application -ErrorAction SilentlyContinue
+    $cachedProcesses = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
 
     $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
     $logPath = Join-Path $PSScriptRoot "winsweep_${stamp}.log"
@@ -1949,12 +2024,12 @@ $btnClean.Add_Click({
     }
 
     $abortCleanup = $false
+    $currentStep = 0
 
     $logCallback = {
         param([string]$Message)
         $list.Items.Add($Message)
         $list.TopIndex = [Math]::Max(0, $list.Items.Count - 1)
-        [System.Windows.Forms.Application]::DoEvents()
         if ($script:cleanupCancelRequested) {
             $abortCleanup = $true
             $list.Items.Add('[CANCEL] Cleanup cancelled by user. Stopping after current item.')
@@ -1963,16 +2038,15 @@ $btnClean.Add_Click({
         }
     }
 
-    $currentStep = 0
-    foreach ($rowIndex in $selectedRows) {
+    foreach ($item in $selectedItems) {
+        if ($abortCleanup -or $script:cleanupCancelRequested) { break }
+
         $currentStep++
-        $item = $resultsStore[$rowIndex]
         $meta = $item.DeleteMeta
         if (-not $meta) { continue }
 
-        $progressLabel.Text = "Processing $currentStep/$($selectedRows.Count): $($item.Name)"
+        $progressLabel.Text = "Processing $currentStep/$($selectedItems.Count): $($item.Name)"
         $progressBar.Value = [Math]::Min($progressBar.Maximum, $currentStep)
-        [System.Windows.Forms.Application]::DoEvents()
 
         try {
             switch ($meta.Type) {
@@ -1994,7 +2068,7 @@ $btnClean.Add_Click({
                     $line = "REMOVED Startup value: $($meta.Name) in $($meta.Source)"
                 }
                 'StartupShortcut' {
-                    $r = Remove-PathWithRecovery -Path $meta.ShortcutPath -AllowHardDeleteFallback $true -LogCallback $logCallback
+                    $r = Remove-PathWithRecovery -Path $meta.ShortcutPath -AllowHardDeleteFallback $true -LogCallback $logCallback -ShellComObject $shellCom -CachedProcesses $cachedProcesses
                     if ($r.Success) {
                         $manifest.deletedPaths += $meta.ShortcutPath
                         $line = "REMOVED Startup shortcut: $($meta.ShortcutPath) [$($r.Mode)]"
@@ -2014,7 +2088,7 @@ $btnClean.Add_Click({
                     $line = "REMOVED Scheduled task: $($meta.TaskPath)$($meta.TaskName)"
                 }
                 'FilesystemPath' {
-                    $r = Remove-PathWithRecovery -Path $meta.Path -AllowHardDeleteFallback $true -LogCallback $logCallback
+                    $r = Remove-PathWithRecovery -Path $meta.Path -AllowHardDeleteFallback $true -LogCallback $logCallback -ShellComObject $shellCom -CachedProcesses $cachedProcesses
                     if ($r.Success) {
                         $manifest.deletedPaths += $meta.Path
                         $line = "REMOVED Filesystem path: $($meta.Path) [$($r.Mode)]"
@@ -2046,7 +2120,7 @@ $btnClean.Add_Click({
                             }
                             & $logCallback "PRESERVED deep clean root: $p"
                         } else {
-                            $r = Remove-PathWithRecovery -Path $p -AllowHardDeleteFallback $true -LogCallback $logCallback
+                            $r = Remove-PathWithRecovery -Path $p -AllowHardDeleteFallback $true -LogCallback $logCallback -ShellComObject $shellCom -CachedProcesses $cachedProcesses
                             if ($r.Success) {
                                 $manifest.deletedPaths += $p
                             }
@@ -2057,7 +2131,7 @@ $btnClean.Add_Click({
                 'DeepCleanGlob' {
                     $files = Get-ChildItem -LiteralPath $meta.BasePath -Filter $meta.Pattern -File -ErrorAction SilentlyContinue
                     foreach ($f in $files) {
-                        $r = Remove-PathWithRecovery -Path $f.FullName -AllowHardDeleteFallback $true -LogCallback $logCallback
+                        $r = Remove-PathWithRecovery -Path $f.FullName -AllowHardDeleteFallback $true -LogCallback $logCallback -ShellComObject $shellCom -CachedProcesses $cachedProcesses
                         if ($r.Success) {
                             $manifest.deletedPaths += $f.FullName
                         } elseif ($r.Mode -eq 'RequiresAdmin') {
@@ -2091,9 +2165,10 @@ $btnClean.Add_Click({
                 $abortCleanup = $true
             }
         }
+    }
 
-        [System.Windows.Forms.Application]::DoEvents()
-        if ($abortCleanup -or $script:cleanupCancelRequested) { break }
+    if ($shellCom) {
+        [System.Runtime.InteropServices.Marshal]::ReleaseComObject($shellCom) | Out-Null
     }
 
     $manifestPath = Save-UndoManifest -OutDir $PSScriptRoot -ManifestData $manifest
@@ -2103,15 +2178,26 @@ $btnClean.Add_Click({
     $statInfo.Text = "Backup dir: $PSScriptRoot"
     $toolStatus.Text = "Cleanup complete. Log: $logPath"
 
+    $script:cleanupCancelRequested = $true
+    $progressForm.Close()
+
+    $cleaned = @($logLines | Where-Object { $_ -match '^\[OK\]' })
+    $skipped = @($logLines | Where-Object { $_ -match 'SKIPPED' })
+    $failed = @($logLines | Where-Object { $_ -match '^\[FAIL\]|\[CANCEL\]' })
+
+    $summary = "Cleanup complete.`r`n`r`n"
+    $summary += "Cleaned: $($cleaned.Count) item(s)`r`n"
+    if ($skipped.Count -gt 0) { $summary += "Skipped: $($skipped.Count) item(s)`r`n" }
+    if ($failed.Count -gt 0) { $summary += "Failed: $($failed.Count) item(s)`r`n" }
+    $summary += "`r`nLog: $logPath`r`nUndo manifest: $manifestPath"
+
     [System.Windows.Forms.MessageBox]::Show(
-        "Cleanup complete.`r`nLog: $logPath`r`nUndo manifest: $manifestPath",
-        'Done',
+        $summary,
+        'Cleanup Summary',
         [System.Windows.Forms.MessageBoxButtons]::OK,
         [System.Windows.Forms.MessageBoxIcon]::Information
     ) | Out-Null
 
-    $script:cleanupCancelRequested = $true
-    $progressForm.Close()
     $btnScan.PerformClick()
 })
 
