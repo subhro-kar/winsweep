@@ -1355,6 +1355,13 @@ $toolProgress.Style = 'Marquee'
 $toolProgress.Visible = $false
 $toolProgress.Width = 140
 
+$btnAbortScan = New-Object System.Windows.Forms.ToolStripButton('X')
+$btnAbortScan.ForeColor = [System.Drawing.Color]::Red
+$btnAbortScan.Font = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
+$btnAbortScan.ToolTipText = 'Abort Scan'
+$btnAbortScan.Visible = $false
+$btnAbortScan.Padding = New-Object System.Windows.Forms.Padding(2)
+
 $toolStatus = New-Object System.Windows.Forms.ToolStripLabel('Ready')
 
 [void]$toolStrip.Items.Add($btnScan)
@@ -1365,6 +1372,7 @@ $toolStatus = New-Object System.Windows.Forms.ToolStripLabel('Ready')
 [void]$toolStrip.Items.Add($btnUndo)
 [void]$toolStrip.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
 [void]$toolStrip.Items.Add($toolProgress)
+[void]$toolStrip.Items.Add($btnAbortScan)
 [void]$toolStrip.Items.Add($toolStatus)
 
 $banner = New-Object System.Windows.Forms.Label
@@ -1558,10 +1566,24 @@ $resultsStore = [System.Collections.Generic.List[object]]::new()
 $btnClean.Visible = $false
 $btnSelectAll.Visible = $false
 $btnSelectNone.Visible = $false
+$btnAbortScan.Visible = $false
 $btnClean.Enabled = $false
 $btnSelectAll.Enabled = $false
 $btnSelectNone.Enabled = $false
 $toolStatus.Text = 'Select categories and click Scan.'
+
+$btnAbortScan.Add_Click({
+    $script:scanCancelRequested = $true
+    $script:scanRunning = $false
+    $btnAbortScan.Enabled = $false
+    $btnAbortScan.Visible = $false
+    $toolProgress.Style = 'Marquee'
+    $toolProgress.Visible = $false
+    $toolProgress.Value = 0
+    $toolStatus.Text = 'Scan aborted.'
+    $btnScan.Enabled = $true
+    Update-Counts
+})
 
 function Update-Counts {
     $selected = 0
@@ -1569,6 +1591,11 @@ function Update-Counts {
         if ($row.Cells['Selected'].Value -eq $true) { $selected++ }
     }
     $statCounts.Text = "Found: $($grid.Rows.Count) | Selected: $selected"
+    $btnClean.Enabled = ($selected -gt 0)
+    $hasRows = ($grid.Rows.Count -gt 0)
+    $btnClean.Visible = $hasRows
+    $btnSelectAll.Visible = $hasRows
+    $btnSelectNone.Visible = $hasRows
 }
 
 $grid.Add_CurrentCellDirtyStateChanged({
@@ -1614,6 +1641,20 @@ $btnUndo.Add_Click({
     Show-UndoDialog -BackupDir $PSScriptRoot
 })
 
+$script:scanRunning = $false
+
+$form.Add_FormClosing({
+    if ($script:scanRunning) {
+        [System.Windows.Forms.MessageBox]::Show(
+            'A scan is in progress. Click "Abort Scan" to stop it first.',
+            'Scan Running',
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Warning
+        ) | Out-Null
+        $_.Cancel = $true
+    }
+})
+
 $btnScan.Add_Click({
     $selectedCategories = @()
     foreach ($groupName in $groupOrder) {
@@ -1632,100 +1673,119 @@ $btnScan.Add_Click({
     $btnClean.Enabled = $false
     $btnSelectAll.Enabled = $false
     $btnSelectNone.Enabled = $false
+    $btnAbortScan.Visible = $true
+    $btnAbortScan.Enabled = $true
     $toolProgress.Visible = $true
     $toolProgress.Style = 'Continuous'
     $toolStatus.Text = 'Scanning...'
+    $script:scanRunning = $true
+    $script:scanCancelRequested = $false
 
-    try {
-        $grid.Rows.Clear()
-        $resultsStore.Clear()
-        $categoryErrors = [System.Collections.Generic.List[string]]::new()
-        $definitions = @(Get-CategoryDefinitions | Where-Object { $selectedCategories -contains $_.Name })
+    $grid.Rows.Clear()
+    $resultsStore.Clear()
 
-        $toolProgress.Minimum = 0
-        $toolProgress.Maximum = [Math]::Max(1, $definitions.Count)
-        $toolProgress.Value = 0
+    $definitions = @(Get-CategoryDefinitions | Where-Object { $selectedCategories -contains $_.Name })
+    $toolProgress.Minimum = 0
+    $toolProgress.Maximum = [Math]::Max(1, $definitions.Count)
+    $toolProgress.Value = 0
 
-        $totalFound = 0
-        $done = 0
+    $script:scanStepIndex = 0
+    $script:scanDefinitions = $definitions
+    $script:scanErrors = [System.Collections.Generic.List[string]]::new()
 
-        foreach ($definition in $definitions) {
-            $toolStatus.Text = "Scanning category $($done + 1) of $($definitions.Count): $($definition.Name)..."
-            [System.Windows.Forms.Application]::DoEvents()
+    $script:scanTimer = New-Object System.Windows.Forms.Timer
+    $script:scanTimer.Interval = 1
 
-            try {
-                $scanOut = & $definition.Scanner
-                $categoryFound = 0
+    $script:scanTimer.Add_Tick({
+        if ($script:scanCancelRequested) {
+            $script:scanTimer.Stop()
+            $script:scanRunning = $false
+            $script:scanCancelRequested = $false
+            $btnScan.Enabled = $true
+            $btnAbortScan.Visible = $false
+            $btnAbortScan.Enabled = $false
+            $toolProgress.Style = 'Marquee'
+            $toolProgress.Visible = $false
+            $toolProgress.Value = 0
+            $toolStatus.Text = 'Scan aborted.'
+            Update-Counts
+            return
+        }
 
-                if ($scanOut -is [System.Collections.IEnumerable]) {
-                    foreach ($item in $scanOut) {
-                        if ($null -eq $item) { continue }
-                        [void]$resultsStore.Add($item)
-                        Add-ResultRow -TargetGrid $grid -Item $item
-                        $categoryFound++
-                    }
-                } elseif ($null -ne $scanOut) {
-                    [void]$resultsStore.Add($scanOut)
-                    Add-ResultRow -TargetGrid $grid -Item $scanOut
-                    $categoryFound = 1
-                }
+        if ($script:scanStepIndex -ge $script:scanDefinitions.Count) {
+            $script:scanTimer.Stop()
+            $script:scanRunning = $false
+            $btnScan.Enabled = $true
+            $btnAbortScan.Visible = $false
+            $toolProgress.Style = 'Marquee'
+            $toolProgress.Visible = $false
+            $toolProgress.Value = 0
 
-                $totalFound += $categoryFound
-                $statInfo.Text = "Category: $($definition.Name) = $categoryFound item(s) | Total found: $totalFound"
-            } catch {
-                $categoryErrors.Add("$($definition.Name): $($_.Exception.Message)")
-                $statInfo.Text = "Category error: $($definition.Name)"
+            if ($script:scanErrors.Count -gt 0) {
+                $toolStatus.Text = "Scan completed with warnings. Found $($grid.Rows.Count) item(s)."
+                [System.Windows.Forms.MessageBox]::Show(
+                    "Some categories failed:`r`n" + ($script:scanErrors -join "`r`n"),
+                    'Scan Warnings',
+                    [System.Windows.Forms.MessageBoxButtons]::OK,
+                    [System.Windows.Forms.MessageBoxIcon]::Warning
+                ) | Out-Null
+            } else {
+                $toolStatus.Text = "Scan complete. Found $($grid.Rows.Count) item(s)."
             }
 
-            $done++
-            $toolProgress.Value = [Math]::Min($toolProgress.Maximum, $done)
+            if ($grid.Rows.Count -gt 0) {
+                $btnClean.Visible = $true
+                $btnSelectAll.Visible = $true
+                $btnSelectNone.Visible = $true
+                $btnClean.Enabled = $true
+                $btnSelectAll.Enabled = $true
+                $btnSelectNone.Enabled = $true
+                $btnScan.Text = 'Rescan'
+            } else {
+                $btnClean.Visible = $false
+                $btnSelectAll.Visible = $false
+                $btnSelectNone.Visible = $false
+                $btnClean.Enabled = $false
+                $btnSelectAll.Enabled = $false
+                $btnSelectNone.Enabled = $false
+                $btnScan.Text = 'Scan'
+            }
             Update-Counts
-            [System.Windows.Forms.Application]::DoEvents()
+            return
         }
 
-        if ($categoryErrors.Count -gt 0) {
-            $toolStatus.Text = "Scan completed with warnings. Found $($grid.Rows.Count) item(s)."
-            [System.Windows.Forms.MessageBox]::Show(
-                "Some categories failed:`r`n" + ($categoryErrors -join "`r`n"),
-                'Scan Warnings',
-                [System.Windows.Forms.MessageBoxButtons]::OK,
-                [System.Windows.Forms.MessageBoxIcon]::Warning
-            ) | Out-Null
-        } else {
-            $toolStatus.Text = "Scan complete. Found $($grid.Rows.Count) item(s)."
+        $def = $script:scanDefinitions[$script:scanStepIndex]
+        $script:scanStepIndex++
+
+        $toolProgress.Value = $script:scanStepIndex
+        $toolStatus.Text = "Scanning: $($def.Name)..."
+        $statCounts.Text = "Scanning: $($def.Name)... | $($grid.Rows.Count) item(s) found so far"
+        [System.Windows.Forms.Application]::DoEvents()
+
+        try {
+            $scanOut = & $def.Scanner
+            $count = 0
+            if ($scanOut -is [System.Collections.IEnumerable]) {
+                foreach ($item in $scanOut) {
+                    if ($null -ne $item) {
+                        [void]$resultsStore.Add($item)
+                        Add-ResultRow -TargetGrid $grid -Item $item
+                        $count++
+                    }
+                }
+            } elseif ($null -ne $scanOut) {
+                [void]$resultsStore.Add($scanOut)
+                Add-ResultRow -TargetGrid $grid -Item $scanOut
+                $count = 1
+            }
+        } catch {
+            $script:scanErrors.Add("$($def.Name): $($_.Exception.Message)")
         }
 
-        if ($grid.Rows.Count -gt 0) {
-            $btnClean.Visible = $true
-            $btnSelectAll.Visible = $true
-            $btnSelectNone.Visible = $true
-            $btnClean.Enabled = $true
-            $btnSelectAll.Enabled = $true
-            $btnSelectNone.Enabled = $true
-            $btnScan.Text = 'Rescan'
-        } else {
-            $btnClean.Visible = $false
-            $btnSelectAll.Visible = $false
-            $btnSelectNone.Visible = $false
-            $btnClean.Enabled = $false
-            $btnSelectAll.Enabled = $false
-            $btnSelectNone.Enabled = $false
-            $btnScan.Text = 'Scan'
-        }
-    } catch {
-        $toolStatus.Text = "Scan failed: $($_.Exception.Message)"
-        [System.Windows.Forms.MessageBox]::Show(
-            "Scan failed: $($_.Exception.Message)",
-            'Scan Error',
-            [System.Windows.Forms.MessageBoxButtons]::OK,
-            [System.Windows.Forms.MessageBoxIcon]::Error
-        ) | Out-Null
-    } finally {
-        $btnScan.Enabled = $true
-        $toolProgress.Style = 'Marquee'
-        $toolProgress.Visible = $false
-        Update-Counts
-    }
+        $statCounts.Text = "Scanning... | $($grid.Rows.Count) item(s) found so far"
+    })
+
+    $script:scanTimer.Start()
 })
 
 $btnClean.Add_Click({
@@ -1874,6 +1934,7 @@ $btnClean.Add_Click({
     })
 
     $progressForm.Show()
+    [System.Windows.Forms.Application]::DoEvents()
 
     $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
     $logPath = Join-Path $PSScriptRoot "winsweep_${stamp}.log"
